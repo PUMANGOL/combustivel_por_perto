@@ -1,0 +1,6 @@
+# Ficheiros que nunca vão para a Vercel (dados locais, segredos e cópias)
+.env
+dados/
+copias/
+cloudflared.exe
+vercel-estatico/

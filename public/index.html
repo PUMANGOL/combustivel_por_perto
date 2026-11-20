@@ -557,12 +557,15 @@ function criarDB(){
     delete: () => api('DELETE', url(col,id)),
     onSnapshot: (ok,erro) => ouvir(col, String(id), ok, erro)
   });
-  /* tempo real: o servidor avisa quando uma tabela muda; ao religar, recarrega tudo */
-  let falhou = false;
+  /* tempo real: o servidor envia a versão de cada tabela ao ligar e sempre que alguma muda;
+     recarrega-se só o que mudou (também depois de religar, por exemplo quando a Vercel renova a ligação) */
+  let versoes = null;
   const es = new EventSource('/api/eventos');
-  es.addEventListener('mudou', e => { if(e.data==='historico'){ aoMudarHistorico(); return; } carregar(e.data); });
-  es.onerror = () => { falhou = true; };
-  es.onopen = () => { if(falhou){ falhou=false; Object.keys(ouvintes).forEach(carregar); } };
+  es.addEventListener('versoes', e => {
+    let v; try{ v = JSON.parse(e.data) || {}; }catch(_){ return; }
+    if(versoes) for(const col of new Set([...Object.keys(v), ...Object.keys(versoes)])) if(v[col]!==versoes[col]){ if(col==='historico') aoMudarHistorico(); else carregar(col); }
+    versoes = v;
+  });
   return {
     collection: col => ({ doc: id => refDoc(col,id), onSnapshot: (ok,erro) => ouvir(col, null, ok, erro) }),
     doc: caminho => { const [col,id] = caminho.split('/'); return refDoc(col,id); }

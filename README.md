@@ -1,6 +1,6 @@
-# Combustível por Perto · Pumangol — versão 5.13
+# Combustível por Perto · Pumangol — versão 5.14
 
-Portal onde os clientes vêem em que postos Pumangol há gasolina e gasóleo. Endereço de produção: **https://combustivel.por.perto.pumangol.co.ao**. A instalação no servidor está descrita em **INSTALAR-SERVIDOR.md**.
+Portal onde os clientes vêem em que postos Pumangol há gasolina e gasóleo. Endereço de produção: **https://combustivel.por.perto.pumangol.co.ao**. A instalação num servidor próprio está descrita em **INSTALAR-SERVIDOR.md**; a publicação na **Vercel** (com a base de dados Turso) em **VERCEL.md**.
 
 ## O que o cliente vê
 
@@ -60,6 +60,7 @@ Precisa do **Node.js 22.13 ou superior** (versão LTS em nodejs.org).
 | `Teste de integridade.bat` | teste automático da gravação das confirmações (62 verificações, com dados temporários) |
 | `Teste de seguranca.bat` | teste de segurança automático (92 verificações, com dados temporários) |
 | `Copia de seguranca.bat` | cópia dos dados para a pasta `copias` |
+| `VERCEL.md`, `vercel.json`, `api/` | publicação na Vercel (dados na Turso) |
 | `dados/` | contas e confirmações: **não apague** |
 
 O relatório da auditoria de segurança está em **RELATORIO-SEGURANCA.md**. O admin consulta o **registo de auditoria** no separador Gestão.

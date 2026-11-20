@@ -1,8 +1,10 @@
 /* Teste de segurança (auditoria técnica) do Combustível por Perto.
    Corre portais à parte (portas 3997 e 3998) com dados TEMPORÁRIOS: não toca nos dados reais.
-   Uso: node scripts/teste-seguranca.js */
+   Uso: node scripts/teste-seguranca.js
+   Com TESTE_TURSO=1, o mesmo teste corre com o cliente Turso/libSQL (num ficheiro local), o modo usado na Vercel. */
 'use strict';
 const os = require('os'), fs = require('fs'), path = require('path'), crypto = require('crypto');
+const { pathToFileURL } = require('url');
 const { spawn, execFileSync } = require('child_process');
 const jwt = require('jsonwebtoken');
 
@@ -14,16 +16,20 @@ const ok = (nome, cond, info = '') => res.push({ grupo, nome, ok: !!cond, info: 
 const titulo = g => { grupo = g; };
 
 function ambiente(porta, extra = {}) {
-  return { ...process.env, DADOS_FICHEIRO: path.join(pasta, `d${porta}.sqlite`), PORT: String(porta), HOST: '127.0.0.1', COOKIE_SECURE: 'false',
-    TRUST_PROXY: 'loopback', JWT_SECRET: SEGREDO, LIMITE_ESCRITAS_MIN: '100000', ...extra };
+  /* a base de dados é sempre a temporária: nunca a Turso nem o ficheiro indicados no .env */
+  const f = path.join(pasta, `d${porta}.sqlite`);
+  return { ...process.env, DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', VERCEL: '',
+    PORT: String(porta), HOST: '127.0.0.1', COOKIE_SECURE: 'false', TRUST_PROXY: 'loopback', JWT_SECRET: SEGREDO, LIMITE_ESCRITAS_MIN: '100000', ...extra };
 }
 function contas(env) {
   execFileSync(process.execPath, ['-e', `
     const a=require(${JSON.stringify(path.join(RAIZ, 'armazem'))}), b=require('bcryptjs'); const h=b.hashSync('SenhaTeste2026',12);   /* custo igual ao de produção, para a medição de tempo ser justa */
-    a.criarUtilizador({utilizador:'admin1',nome:'Admin',hash:h,perfil:'admin'});
-    a.criarUtilizador({utilizador:'gestor1',nome:'Gestor',hash:h,perfil:'gestor'});
-    a.criarUtilizador({utilizador:'posto09',nome:'TALATONA',hash:h,perfil:'posto',posto:'9'});
-    a.criarUtilizador({utilizador:'alvo1',nome:'Alvo',hash:h,perfil:'gestor'}); a.fechar();`], { cwd: RAIZ, env, stdio: 'pipe' });
+    (async () => {
+      await a.criarUtilizador({utilizador:'admin1',nome:'Admin',hash:h,perfil:'admin'});
+      await a.criarUtilizador({utilizador:'gestor1',nome:'Gestor',hash:h,perfil:'gestor'});
+      await a.criarUtilizador({utilizador:'posto09',nome:'TALATONA',hash:h,perfil:'posto',posto:'9'});
+      await a.criarUtilizador({utilizador:'alvo1',nome:'Alvo',hash:h,perfil:'gestor'}); await a.fechar();
+    })().catch(e => { console.error(e); process.exit(1); });`], { cwd: RAIZ, env, stdio: 'pipe' });
 }
 function ligar(env) {
   return new Promise((ok_, falha) => {
@@ -150,8 +156,9 @@ const parar = p => new Promise(r => { p.once('exit', r); p.kill(); });
 
   /* 7. tempo real */
   titulo('Ligações de tempo real');
-  const ctls = [], sts = [];
-  for (let i = 0; i < 51; i++) { const c = new AbortController(); ctls.push(c); sts.push(await fetch(BASE + '/api/eventos', { signal: c.signal, headers: { 'X-Forwarded-For': '10.9.9.9' } }).then(r => r.status).catch(() => 0)); }
+  /* as respostas ficam guardadas: sem isso o fetch pode libertá-las e fechar as ligações a meio do teste */
+  const ctls = [], sts = [], abertas = [];
+  for (let i = 0; i < 51; i++) { const c = new AbortController(); ctls.push(c); sts.push(await fetch(BASE + '/api/eventos', { signal: c.signal, headers: { 'X-Forwarded-For': '10.9.9.9' } }).then(r => { abertas.push(r); return r.status; }).catch(() => 0)); }
   const outro = await fetch(BASE + '/api/eventos', { headers: { 'X-Forwarded-For': '10.9.9.10' } }).then(r => { r.body.cancel(); return r.status; });
   ctls.forEach(c => c.abort());
   ok('No máximo 50 ligações de tempo real por visitante', sts.slice(0, 50).every(s => s === 200) && sts[50] === 429, sts.filter(s => s !== 200).length);

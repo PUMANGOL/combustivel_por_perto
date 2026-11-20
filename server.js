@@ -1,7 +1,8 @@
-/* Combustível por Perto (Pumangol) — servidor, versão 5.7: independente de outras bases de dados.
-   As confirmações dos postos ficam num ficheiro local; cada nova confirmação substitui a anterior.
-   Serve o portal (public/), guarda os dados em dados/via-abastece.sqlite e envia as
-   alterações em tempo real (SSE) a todos os ecrãs abertos. */
+/* Combustível por Perto (Pumangol) — servidor, versão 5.14: independente de outras bases de dados.
+   As confirmações dos postos ficam na base de dados do portal; cada nova confirmação substitui a anterior.
+   Serve o portal (public/), guarda os dados (ficheiro SQLite ou Turso, ver armazem.js) e envia as
+   alterações em tempo real (SSE) a todos os ecrãs abertos.
+   Servidor próprio: node server.js. Vercel: api/index.js usa esta mesma aplicação (ver VERCEL.md). */
 'use strict';
 require('./preparar-env');
 const path = require('path');
@@ -14,11 +15,16 @@ const bcrypt = require('bcryptjs');
 const armazem = require('./armazem');
 const postos = require('./postos');
 
+/* na Vercel o portal está sempre atrás de HTTPS e de um único proxy (que substitui o X-Forwarded-For) */
+const NA_VERCEL = !!process.env.VERCEL;
 const {
   PORT = 3000,
-  JWT_SECRET, COOKIE_SECURE = 'false', TRUST_PROXY = 'loopback', HOST
+  JWT_SECRET, COOKIE_SECURE = NA_VERCEL ? 'true' : 'false', TRUST_PROXY = NA_VERCEL ? '1' : 'loopback', HOST
 } = process.env;
-if (!JWT_SECRET || JWT_SECRET.length < 32) { console.error('Defina JWT_SECRET (mín. 32 caracteres) no .env'); process.exit(1); }
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  console.error('Defina JWT_SECRET (mín. 32 caracteres) no .env ou nas variáveis de ambiente (na Vercel: Settings › Environment Variables).');
+  process.exit(1);
+}
 
 
 /* ---------- colecções e permissões ----------
@@ -64,26 +70,38 @@ app.use((req, res, next) => {
   next();
 });
 
-/* limite geral de escritas por IP (protege contra abusos e scripts em ciclo) */
-const escritas = new Map(), LIMITE_ESCRITAS = Math.max(10, +process.env.LIMITE_ESCRITAS_MIN || 120);
-app.use('/api', (req, res, next) => {
+/* ---------- preparação ----------
+   Tabelas, lista de postos e versões prontas antes do primeiro pedido. No servidor próprio acontece ao arrancar;
+   na Vercel, no primeiro pedido de cada instância. Se falhar, tenta de novo no pedido seguinte. */
+let preparado = null;
+function preparar() {
+  return (preparado ||= (async () => {
+    await armazem.iniciar();
+    Object.assign(conhecidas, await armazem.versoes());
+    return sincronizarPostos();
+  })().catch(e => { preparado = null; throw e; }));
+}
+app.use((req, res, next) => { preparar().then(() => next(), next); });
+
+/* limite geral de escritas por IP (protege contra abusos e scripts em ciclo).
+   Os contadores ficam na base de dados, para valerem em todas as instâncias do portal. */
+const LIMITE_ESCRITAS = Math.max(10, +process.env.LIMITE_ESCRITAS_MIN || 120);
+app.use('/api', async (req, res, next) => {
   if (req.method === 'GET') return next();
-  const k = req.ip, agora = Date.now(), t = escritas.get(k) || { n: 0, desde: agora };
-  if (agora - t.desde > 60e3) { t.n = 0; t.desde = agora; }
-  if (++t.n > LIMITE_ESCRITAS) return res.status(429).json({ erro: 'Demasiados pedidos. Aguarde um minuto.' });
-  escritas.set(k, t); next();
+  if (await armazem.somarLimite('escrita:' + req.ip, 60e3) > LIMITE_ESCRITAS) return res.status(429).json({ erro: 'Demasiados pedidos. Aguarde um minuto.' });
+  next();
 });
 
 /* ---------- sessão ---------- */
 const COOKIE = SEGURO ? '__Host-sessao' : 'sessao';
 /* «versão» da senha dentro da sessão: mudar a senha termina todas as sessões abertas dessa conta */
 const versaoSenha = h => crypto.createHash('sha256').update(String(h)).digest('hex').slice(0, 16);
-function sessao(req, _res, next) {
+async function sessao(req, _res, next) {
   req.u = null;
   const t = req.cookies[COOKIE];
   if (t) {
     try {
-      const u = jwt.verify(t, JWT_SECRET, { algorithms: ['HS256'] }), c = armazem.porId(u.id);
+      const u = jwt.verify(t, JWT_SECRET, { algorithms: ['HS256'] }), c = await armazem.porId(u.id);
       /* conta desactivada, apagada, com perfil/posto alterado ou com senha mudada: a sessão deixa de valer */
       if (c && c.activo && c.perfil === u.perfil && String(c.posto_id ?? '') === String(u.posto ?? '') && u.sv === versaoSenha(c.senha_hash))
         req.u = { id: u.id, nome: u.nome, perfil: u.perfil, posto: u.posto, utilizador: c.utilizador };
@@ -101,15 +119,16 @@ function soPortal(req, res, next) {
 const exige = nivel => (req, res, next) =>
   nivelDe(req.u) >= NIVEL[nivel] ? next() : res.status(req.u ? 403 : 401).json({ erro: 'Sem permissão.' });
 
-/* tentativas falhadas: no máximo 20 por IP e 5 por conta em 15 minutos */
-const JANELA = 15 * 60e3, falhasIp = new Map(), falhasConta = new Map();
-const contar = (m, k) => { const agora = Date.now(), t = m.get(k); return t && agora - t.desde < JANELA ? t.n : 0; };
-const falhou = (m, k) => { const agora = Date.now(), t = m.get(k); if (!t || agora - t.desde >= JANELA) m.set(k, { n: 1, desde: agora }); else t.n++; };
-setInterval(() => { const agora = Date.now(); for (const m of [falhasIp, falhasConta, escritas]) for (const [k, t] of m) if (agora - t.desde > JANELA) m.delete(k); }, 60e3).unref();
-function limiteLogin(req, res, next) {
+/* tentativas falhadas: no máximo 20 por IP e 5 por conta em 15 minutos (contadores na base de dados) */
+const JANELA = 15 * 60e3;
+const chaveConta = u => 'entrada-conta:' + String(u || '').trim().toLowerCase().slice(0, 40);
+const chaveIp = ip => 'entrada-ip:' + ip;
+const falhou = (ip, conta) => armazem.somarLimites([chaveIp(ip), chaveConta(conta)], JANELA);
+async function limiteLogin(req, res, next) {
   const conta = String((req.body && req.body.utilizador) || '').trim().toLowerCase().slice(0, 40);
-  if (contar(falhasIp, req.ip) >= 20 || (conta && contar(falhasConta, conta) >= 5)) {
-    armazem.auditar('entrada_bloqueada', { utilizador: conta, ip: req.ip });
+  const [nIp, nConta] = await armazem.contarLimites([chaveIp(req.ip), chaveConta(conta)], JANELA);
+  if (nIp >= 20 || (conta && nConta >= 5)) {
+    await armazem.auditar('entrada_bloqueada', { utilizador: conta, ip: req.ip });
     return res.status(429).json({ erro: 'Demasiadas tentativas. Tente de novo dentro de 15 minutos.' });
   }
   next();
@@ -120,23 +139,23 @@ app.post('/api/entrar', soPortal, limiteLogin, async (req, res) => {
   const { utilizador, senha } = req.body || {};
   if (typeof utilizador !== 'string' || typeof senha !== 'string') return res.status(400).json({ erro: 'Indique utilizador e senha.' });
   if (utilizador.length > 80 || senha.length > 200) return res.status(400).json({ erro: 'Utilizador ou senha incorrectos.' });
-  const u = armazem.utilizador(utilizador);
+  const u = await armazem.utilizador(utilizador);
   const certa = await bcrypt.compare(senha, u ? u.senha_hash : HASH_FALSO);
   if (!u || !certa) {
-    falhou(falhasIp, req.ip); falhou(falhasConta, utilizador.trim().toLowerCase().slice(0, 40));
-    armazem.auditar('entrada_falhada', { utilizador: utilizador.slice(0, 40), ip: req.ip });
+    await falhou(req.ip, utilizador);
+    await armazem.auditar('entrada_falhada', { utilizador: utilizador.slice(0, 40), ip: req.ip });
     return res.status(401).json({ erro: 'Utilizador ou senha incorrectos.' });
   }
-  falhasConta.delete(utilizador.trim().toLowerCase().slice(0, 40));
+  await armazem.limparLimite(chaveConta(utilizador));
   const dados = { id: u.id, nome: u.nome, perfil: u.perfil, posto: u.posto_id, utilizador: u.utilizador, sv: versaoSenha(u.senha_hash) };
   res.cookie(COOKIE, jwt.sign(dados, JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' }), {
     httpOnly: true, sameSite: 'strict', secure: SEGURO, maxAge: 12 * 3600e3, path: '/'
   });
-  armazem.auditar('entrada', { conta: u.id, utilizador: u.utilizador, ip: req.ip });
+  await armazem.auditar('entrada', { conta: u.id, utilizador: u.utilizador, ip: req.ip });
   res.json(perfilPublico(dados));
 });
-app.post('/api/sair', soPortal, (req, res) => {
-  if (req.u) armazem.auditar('saida', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
+app.post('/api/sair', soPortal, async (req, res) => {
+  if (req.u) await armazem.auditar('saida', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
   res.clearCookie(COOKIE, { path: '/', httpOnly: true, sameSite: 'strict', secure: SEGURO }); res.json({ ok: true });
 });
 const perfilPublico = u => (u ? { nivel: u.perfil, conta: String(u.id), nome: u.nome, posto: u.posto, utilizador: u.utilizador } : { nivel: 'cliente', conta: null });
@@ -171,59 +190,60 @@ const nomeValido = n => typeof n === 'string' && n.trim().length > 0 && n.length
 const senhaInvalida = s => typeof s !== 'string' || s.length < 10 ? 'A senha tem de ter pelo menos 10 caracteres.'
   : Buffer.byteLength(s, 'utf8') > 72 ? 'A senha é demasiado longa (máximo 72 caracteres).' : null;
 const contaPublica = c => ({ utilizador: c.utilizador, nome: c.nome, perfil: c.perfil, posto_id: c.posto_id, activo: !!c.activo });
-app.get('/api/contas', exige('admin'), (_req, res) => res.set('Cache-Control', 'no-store').json(armazem.contas().map(contaPublica)));
+const adminsActivos = async () => (await armazem.contas()).filter(c => c.activo && c.perfil === 'admin').length;
+app.get('/api/contas', exige('admin'), async (_req, res) => res.set('Cache-Control', 'no-store').json((await armazem.contas()).map(contaPublica)));
 app.post('/api/contas', soPortal, exige('admin'), async (req, res) => {
   const { utilizador, nome, perfil, posto, senha } = req.body || {};
   if (typeof utilizador !== 'string' || !UTIL_OK.test(utilizador)) return res.status(400).json({ erro: 'Utilizador inválido: use 3 a 40 letras, números, ponto, hífen ou sublinhado, sem espaços.' });
   if (!nomeValido(nome)) return res.status(400).json({ erro: 'Indique o nome a mostrar (até 80 caracteres, sem < nem >).' });
   if (!PERFIS.includes(perfil)) return res.status(400).json({ erro: 'Perfil inválido.' });
-  if (perfil === 'posto' && !postos.validos(armazem).has(String(posto))) return res.status(400).json({ erro: 'Esse posto não existe na lista de postos.' });
+  if (perfil === 'posto' && !(await postos.validos(armazem)).has(String(posto))) return res.status(400).json({ erro: 'Esse posto não existe na lista de postos.' });
   if (perfil === 'posto' && !(typeof posto === 'string' || typeof posto === 'number') || perfil === 'posto' && !String(posto).trim()) return res.status(400).json({ erro: 'Escolha o posto desta conta.' });
   if (senhaInvalida(senha)) return res.status(400).json({ erro: senhaInvalida(senha) });
   if (perfil === 'posto' && utilizador.toLowerCase() !== 'posto' + String(posto).trim().padStart(2, '0'))
     return res.status(400).json({ erro: `O utilizador de uma conta de posto é «posto${String(posto).trim().padStart(2, '0')}».` });
-  if (armazem.existeUtilizador(utilizador)) return res.status(409).json({ erro: `Já existe uma conta «${utilizador}». Escolha outro utilizador, ou use «Nova senha» nessa conta.` });
-  armazem.criarUtilizador({ utilizador: perfil === 'posto' ? utilizador.toLowerCase() : utilizador, nome: nome.trim(), hash: await bcrypt.hash(senha, 12), perfil, posto: perfil === 'posto' ? String(posto) : null });
-  armazem.auditar('conta_criada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: utilizador, perfil, posto: perfil === 'posto' ? String(posto) : null }, ip: req.ip });
+  if (await armazem.existeUtilizador(utilizador)) return res.status(409).json({ erro: `Já existe uma conta «${utilizador}». Escolha outro utilizador, ou use «Nova senha» nessa conta.` });
+  await armazem.criarUtilizador({ utilizador: perfil === 'posto' ? utilizador.toLowerCase() : utilizador, nome: nome.trim(), hash: await bcrypt.hash(senha, 12), perfil, posto: perfil === 'posto' ? String(posto) : null });
+  await armazem.auditar('conta_criada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: utilizador, perfil, posto: perfil === 'posto' ? String(posto) : null }, ip: req.ip });
   res.json({ ok: true });
 });
 app.post('/api/contas/:u/senha', soPortal, exige('admin'), async (req, res) => {
   const { senha } = req.body || {};
   if (senhaInvalida(senha)) return res.status(400).json({ erro: senhaInvalida(senha) });
-  if (!armazem.mudarSenha(req.params.u, await bcrypt.hash(senha, 12))) return res.status(404).json({ erro: 'Conta não encontrada.' });
-  armazem.auditar('senha_reposta', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: req.params.u }, ip: req.ip });
+  if (!(await armazem.mudarSenha(req.params.u, await bcrypt.hash(senha, 12)))) return res.status(404).json({ erro: 'Conta não encontrada.' });
+  await armazem.auditar('senha_reposta', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: req.params.u }, ip: req.ip });
   res.json({ ok: true });
 });
-app.post('/api/contas/:u/estado', soPortal, exige('admin'), (req, res) => {
+app.post('/api/contas/:u/estado', soPortal, exige('admin'), async (req, res) => {
   if (req.params.u.toLowerCase() === String(req.u.utilizador || '').toLowerCase()) return res.status(400).json({ erro: 'Não pode desactivar a sua própria conta.' });
   const activo = !!(req.body && req.body.activo);
-  if (!activo && armazem.porNome(req.params.u)?.perfil === 'admin' && armazem.contas().filter(c => c.activo && c.perfil === 'admin').length <= 1)
+  if (!activo && (await armazem.porNome(req.params.u))?.perfil === 'admin' && await adminsActivos() <= 1)
     return res.status(400).json({ erro: 'Tem de existir pelo menos uma conta de admin activa.' });
-  if (!armazem.estadoConta(req.params.u, activo)) return res.status(404).json({ erro: 'Conta não encontrada.' });
-  armazem.auditar(activo ? 'conta_reactivada' : 'conta_desactivada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: req.params.u }, ip: req.ip });
+  if (!(await armazem.estadoConta(req.params.u, activo))) return res.status(404).json({ erro: 'Conta não encontrada.' });
+  await armazem.auditar(activo ? 'conta_reactivada' : 'conta_desactivada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: req.params.u }, ip: req.ip });
   res.json({ ok: true });
 });
 /* alterar o perfil de uma conta: só o admin, e nunca o seu próprio */
-app.post('/api/contas/:u/perfil', soPortal, exige('admin'), (req, res) => {
+app.post('/api/contas/:u/perfil', soPortal, exige('admin'), async (req, res) => {
   const { perfil, posto } = req.body || {};
-  const c = armazem.porNome(req.params.u);
+  const c = await armazem.porNome(req.params.u);
   if (!c) return res.status(404).json({ erro: 'Conta não encontrada.' });
   if (c.utilizador.toLowerCase() === String(req.u.utilizador || '').toLowerCase()) return res.status(400).json({ erro: 'Não pode alterar o seu próprio perfil.' });
   if (!PERFIS.includes(perfil)) return res.status(400).json({ erro: 'Perfil inválido.' });
-  if (perfil === 'posto' && !postos.validos(armazem).has(String(posto))) return res.status(400).json({ erro: 'Escolha um posto da lista.' });
-  if (c.perfil === 'admin' && perfil !== 'admin' && armazem.contas().filter(x => x.activo && x.perfil === 'admin').length <= 1)
+  if (perfil === 'posto' && !(await postos.validos(armazem)).has(String(posto))) return res.status(400).json({ erro: 'Escolha um posto da lista.' });
+  if (c.perfil === 'admin' && perfil !== 'admin' && await adminsActivos() <= 1)
     return res.status(400).json({ erro: 'Tem de existir pelo menos uma conta de admin activa.' });
-  armazem.alterarPerfil(c.utilizador, perfil, perfil === 'posto' ? String(posto) : null);
-  armazem.auditar('perfil_alterado', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: c.utilizador, de: c.perfil + (c.posto_id ? ':' + c.posto_id : ''), para: perfil + (perfil === 'posto' ? ':' + posto : '') }, ip: req.ip });
+  await armazem.alterarPerfil(c.utilizador, perfil, perfil === 'posto' ? String(posto) : null);
+  await armazem.auditar('perfil_alterado', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: c.utilizador, de: c.perfil + (c.posto_id ? ':' + c.posto_id : ''), para: perfil + (perfil === 'posto' ? ':' + posto : '') }, ip: req.ip });
   res.json({ ok: true });
 });
 
 /* ---------- confirmação de um posto (único caminho de escrita das confirmações) ---------- */
 const MOMENTO_OK = { 'Início de turno': ['venda', 'interrompida'], 'Reconfirmação': ['venda', 'interrompida'], 'Combustível esgotado': ['interrompida'], 'Venda retomada': ['venda'] };
-app.post('/api/confirmar', soPortal, exige('posto'), (req, res) => {
+app.post('/api/confirmar', soPortal, exige('posto'), async (req, res) => {
   const { posto, momento, responsavel, itens } = req.body || {};
   const pid = String(posto ?? '').trim();
-  if (!postos.validos(armazem).has(pid)) return res.status(400).json({ erro: 'Posto desconhecido.' });
+  if (!(await postos.validos(armazem)).has(pid)) return res.status(400).json({ erro: 'Posto desconhecido.' });
   if (req.u.perfil === 'posto' && String(req.u.posto) !== pid) return res.status(403).json({ erro: 'Esta conta só pode confirmar o seu posto.' });
   if (!Object.hasOwn(MOMENTO_OK, momento)) return res.status(400).json({ erro: 'Momento inválido.' });
   const nome = req.u.perfil === 'posto' ? (typeof responsavel === 'string' ? responsavel.trim() : '') : req.u.nome;   /* gestor/admin: o nome da conta */
@@ -231,8 +251,8 @@ app.post('/api/confirmar', soPortal, exige('posto'), (req, res) => {
   const erro = itensInvalidos(itens, momento);
   if (erro) return res.status(400).json({ erro });
   const hora = Date.now();     /* a hora é sempre a do servidor */
-  armazem.confirmar(linhasDe([pid], itens, momento, nome, req.u.id, hora), req.u.id);
-  avisar('confirmacoes'); avisar('registos'); avisarContas('historico');
+  await armazem.confirmar(linhasDe([pid], itens, momento, nome, req.u.id, hora), req.u.id);
+  await avisar('confirmacoes', 'registos', 'historico');
   res.json({ ok: true, hora });
 });
 function itensInvalidos(itens, momento) {
@@ -259,48 +279,48 @@ function linhasDe(ids, itens, momento, nome, conta, hora) {
   return out;
 }
 /* registo de auditoria: só o admin consulta; ninguém o altera pelo portal */
-app.get('/api/auditoria', exige('admin'), (req, res) => res.json(armazem.auditoria(req.query.limite)));
+app.get('/api/auditoria', exige('admin'), async (req, res) => res.json(await armazem.auditoria(req.query.limite)));
 /* histórico: as 5 últimas confirmações de um posto e combustível (só contas; o posto só vê o seu) */
-app.get('/api/historico', exige('posto'), (req, res) => {
+app.get('/api/historico', exige('posto'), async (req, res) => {
   const pid = String(req.query.posto ?? '').trim(), prod = String(req.query.prod || '');
   if (!['GA', 'GO'].includes(prod)) return res.status(400).json({ erro: 'Combustível inválido.' });
-  if (!postos.validos(armazem).has(pid)) return res.status(400).json({ erro: 'Posto desconhecido.' });
+  if (!(await postos.validos(armazem)).has(pid)) return res.status(400).json({ erro: 'Posto desconhecido.' });
   if (req.u.perfil === 'posto' && String(req.u.posto) !== pid) return res.status(403).json({ erro: 'Esta conta só vê o histórico do seu posto.' });
-  res.set('Cache-Control', 'no-store').json(armazem.historico(pid, prod));
+  res.set('Cache-Control', 'no-store').json(await armazem.historico(pid, prod));
 });
 /* lista de postos e confirmações sempre alinhadas: postos novos começam «Disponível», postos retirados saem */
-function sincronizarPostos() {
-  const ids = [...postos.validos(armazem)];
-  const novos = armazem.semear(ids), retirados = armazem.limparOrfaos(ids);
-  if ((novos || retirados) && typeof avisar === 'function') { try { avisar('confirmacoes'); avisar('registos'); } catch (_) {} }
+async function sincronizarPostos() {
+  const ids = [...await postos.validos(armazem)];
+  const novos = await armazem.semear(ids), retirados = await armazem.limparOrfaos(ids);
+  if (novos || retirados) await avisar('confirmacoes', 'registos');
   return { novos, retirados };
 }
 /* admin: o mesmo estado em toda a rede, numa só operação (tudo ou nada) */
-app.post('/api/confirmar-rede', soPortal, exige('admin'), (req, res) => {
+app.post('/api/confirmar-rede', soPortal, exige('admin'), async (req, res) => {
   const { momento, itens } = req.body || {};
   if (!Object.hasOwn(MOMENTO_OK, momento)) return res.status(400).json({ erro: 'Momento inválido.' });
   const erro = itensInvalidos(itens, momento);
   if (erro) return res.status(400).json({ erro });
-  const ids = [...postos.validos(armazem)], hora = Date.now();
-  armazem.confirmar(linhasDe(ids, itens, momento, req.u.nome, req.u.id, hora), req.u.id);
-  armazem.auditar('rede_confirmada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { momento, itens, postos: ids.length }, ip: req.ip });
-  avisar('confirmacoes'); avisar('registos'); avisarContas('historico');
+  const ids = [...await postos.validos(armazem)], hora = Date.now();
+  await armazem.confirmar(linhasDe(ids, itens, momento, req.u.nome, req.u.id, hora), req.u.id);
+  await armazem.auditar('rede_confirmada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { momento, itens, postos: ids.length }, ip: req.ip });
+  await avisar('confirmacoes', 'registos', 'historico');
   res.json({ ok: true, postos: ids.length, hora });
 });
 
 app.post('/api/senha', soPortal, limiteLogin, async (req, res) => {
   if (!req.u) return res.status(401).json({ erro: 'Entre primeiro no portal.' });
   const { actual, nova } = req.body || {};
-  const c = armazem.utilizador(req.u.utilizador);
+  const c = await armazem.utilizador(req.u.utilizador);
   if (!c || typeof actual !== 'string' || !(await bcrypt.compare(actual, c.senha_hash))) {
-    falhou(falhasIp, req.ip); falhou(falhasConta, String(req.u.utilizador).toLowerCase());
-    armazem.auditar('senha_propria_falhada', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
+    await falhou(req.ip, req.u.utilizador);
+    await armazem.auditar('senha_propria_falhada', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
     return res.status(400).json({ erro: 'A senha actual não está certa.' });
   }
   if (senhaInvalida(nova)) return res.status(400).json({ erro: senhaInvalida(nova) });
   const hash = await bcrypt.hash(nova, 12);
-  armazem.mudarSenha(c.utilizador, hash);
-  armazem.auditar('senha_propria_alterada', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
+  await armazem.mudarSenha(c.utilizador, hash);
+  await armazem.auditar('senha_propria_alterada', { conta: req.u.id, utilizador: req.u.utilizador, ip: req.ip });
   /* as outras sessões desta conta terminam; esta recebe uma sessão nova */
   res.cookie(COOKIE, jwt.sign({ id: c.id, nome: c.nome, perfil: c.perfil, posto: c.posto_id, utilizador: c.utilizador, sv: versaoSenha(hash) }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' }),
     { httpOnly: true, sameSite: 'strict', secure: SEGURO, maxAge: 12 * 3600e3, path: '/' });
@@ -312,7 +332,7 @@ app.get('/api/c/:col', async (req, res) => {
   const c = COLS[req.params.col];
   if (!c) return res.status(404).json({ erro: 'Colecção desconhecida.' });
   if (nivelDe(req.u) < NIVEL[c.ler]) return res.set('Cache-Control', 'no-store').json([]);   /* sem acesso: lista vazia */
-  res.set('Cache-Control', 'no-store').json(vistaDe(req.u, c.tabela, armazem.listar(c.tabela)));
+  res.set('Cache-Control', 'no-store').json(vistaDe(req.u, c.tabela, await armazem.listar(c.tabela)));
 });
 /* o cliente nunca recebe «Indisponível» (vê «Disponibilidade por confirmar»); as contas vêem o estado de toda a rede */
 function vistaDe(u, tabela, linhas) {
@@ -335,10 +355,10 @@ app.put('/api/c/:col/:id', soPortal, async (req, res) => {
   const obj = req.body;
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return res.status(400).json({ erro: 'Dados inválidos.' });
 
-  armazem.gravar(c.tabela, id, obj, req.u.id);
-  armazem.auditar('dados_alterados', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { colecao: req.params.col, id }, ip: req.ip });
-  avisar(req.params.col);
-  if (c.tabela === 'postos') sincronizarPostos();
+  await armazem.gravar(c.tabela, id, obj, req.u.id);
+  await armazem.auditar('dados_alterados', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { colecao: req.params.col, id }, ip: req.ip });
+  await avisar(req.params.col);
+  if (c.tabela === 'postos') await sincronizarPostos();
   res.json({ ok: true });
 });
 
@@ -346,34 +366,68 @@ app.delete('/api/c/:col/:id', soPortal, exige('admin'), async (req, res) => {
   const c = COLS[req.params.col], id = req.params.id;
   if (!c) return res.status(404).json({ erro: 'Colecção desconhecida.' });
   if (!ID_OK.test(id)) return res.status(400).json({ erro: 'Identificador inválido.' });
-  armazem.apagar(c.tabela, id);
-  armazem.auditar('dados_apagados', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { colecao: req.params.col, id }, ip: req.ip });
-  if (c.tabela === 'postos') sincronizarPostos();
-  avisar(req.params.col);
+  await armazem.apagar(c.tabela, id);
+  await armazem.auditar('dados_apagados', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { colecao: req.params.col, id }, ip: req.ip });
+  if (c.tabela === 'postos') await sincronizarPostos();
+  await avisar(req.params.col);
   res.json({ ok: true });
 });
 
 /* ---------- tempo real (Server-Sent Events) ----------
-   Avisa as vistas abertas quando os dados mudam. */
+   Cada alteração sobe a «versão» da colecção na base de dados. Cada instância do portal compara as versões
+   (logo a seguir às suas escritas e, enquanto houver ecrãs ligados, a cada 5 segundos) e avisa os seus ecrãs.
+   Assim os avisos chegam a todos, mesmo com várias instâncias (Vercel). Ao ligar, cada ecrã recebe as versões
+   actuais e recarrega só o que mudou desde a última ligação. */
 const clientes = new Set();
 const SSE_MAX = 5000, SSE_POR_IP = 50;
+/* na Vercel a ligação fecha antes do limite de duração da função; o navegador religa sozinho */
+const SSE_DURACAO = 1000 * (+process.env.SSE_DURACAO_SEG || (NA_VERCEL ? 280 : 0));
+const conhecidas = {};
+const nivelDaColecao = col => col === 'historico' ? NIVEL.posto : COLS[col] ? NIVEL[COLS[col].ler] : NIVEL.admin;
+const versoesPara = nivel => Object.fromEntries(Object.entries(conhecidas).filter(([col]) => nivel >= nivelDaColecao(col)));
+const enviar = (cli, txt) => { try { cli.res.write(txt); } catch (_) { /* ligação já fechada */ } };
+let emCurso = null, outraVez = false;
+function verificarVersoes() {
+  if (emCurso) { outraVez = true; return emCurso; }
+  emCurso = (async () => {
+    do {
+      outraVez = false;
+      const v = await armazem.versoes(), mudaram = [];
+      for (const [col, n] of Object.entries(v)) if ((conhecidas[col] ?? 0) !== n) { conhecidas[col] = n; mudaram.push(col); }
+      if (mudaram.length) for (const cli of clientes) {
+        const vis = mudaram.filter(col => cli.nivel >= nivelDaColecao(col));
+        if (!vis.length) continue;
+        for (const col of vis) enviar(cli, `event: mudou\ndata: ${col}\n\n`);     /* ecrãs abertos antes desta versão */
+        enviar(cli, `event: versoes\ndata: ${JSON.stringify(versoesPara(cli.nivel))}\n\n`);
+      }
+    } while (outraVez);
+  })().catch(e => console.error('tempo real:', e.message)).finally(() => { emCurso = null; });
+  return emCurso;
+}
+/* regista a alteração (para todas as instâncias) e avisa já os ecrãs desta; uma falha aqui não desfaz a escrita */
+async function avisar(...cols) {
+  try { await armazem.marcar(cols); } catch (e) { console.error('tempo real:', e.message); }
+  await verificarVersoes();
+}
+let relogio = null;
+function vigiar() {
+  if (clientes.size && !relogio) relogio = setInterval(verificarVersoes, 5000);
+  else if (!clientes.size && relogio) { clearInterval(relogio); relogio = null; }
+}
 app.get('/api/eventos', (req, res) => {
   if (clientes.size >= SSE_MAX || [...clientes].filter(c => c.ip === req.ip).length >= SSE_POR_IP)
     return res.status(429).json({ erro: 'Demasiadas ligações abertas.' });
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.flushHeaders();
   const cli = { res, nivel: nivelDe(req.u), ip: req.ip };
-  clientes.add(cli);
+  clientes.add(cli); vigiar();
   res.write('retry: 5000\n\n');
-  req.on('close', () => clientes.delete(cli));
+  verificarVersoes().finally(() => { if (clientes.has(cli)) enviar(cli, `event: versoes\ndata: ${JSON.stringify(versoesPara(cli.nivel))}\n\n`); });
+  const fim = SSE_DURACAO ? setTimeout(() => res.end(), SSE_DURACAO) : null;
+  /* «close» da resposta: só quando a ligação fecha (o do pedido dispara logo depois de o pedido ser lido) */
+  res.on('close', () => { clearTimeout(fim); clientes.delete(cli); vigiar(); });
 });
-/* aviso só para os ecrãs com sessão (o histórico não é público) */
-function avisarContas(nome) { for (const cli of clientes) if (cli.nivel >= NIVEL.posto) cli.res.write(`event: mudou\ndata: ${nome}\n\n`); }
-function avisar(col) {
-  const c = COLS[col];
-  for (const cli of clientes) if (cli.nivel >= NIVEL[c.ler]) cli.res.write(`event: mudou\ndata: ${col}\n\n`);
-}
-setInterval(() => { for (const cli of clientes) cli.res.write(': ping\n\n'); }, 25000);
+setInterval(() => { for (const cli of clientes) enviar(cli, ': ping\n\n'); }, 25000).unref();
 
 /* ---------- portal ---------- */
 app.get('/api/saude', async (req, res) => {
@@ -391,12 +445,17 @@ app.use((err, _req, res, _next) => {
   console.error(err); res.status(500).json({ erro: 'Erro no servidor.' });
 });
 
-(async () => {
-  console.log('Dados do portal em:', armazem.ficheiro);
-  const { novos } = sincronizarPostos();
-  if (novos) console.log(`Estado inicial: ${novos} combinações de posto e combustível ficaram «Disponível» por defeito.`);
-  app.listen(+PORT, HOST || undefined, () => {
-    console.log(`Combustível por Perto a correr em http://localhost:${PORT}`);
-    console.log('Deixe esta janela aberta. Para desligar o portal, feche-a ou carregue em Ctrl + C.');
-  });
-})();
+module.exports = app;
+
+/* servidor próprio: node server.js (na Vercel a aplicação é usada por api/index.js, sem listen) */
+if (require.main === module) {
+  (async () => {
+    console.log('Dados do portal em:', armazem.ficheiro);
+    const { novos } = await preparar();
+    if (novos) console.log(`Estado inicial: ${novos} combinações de posto e combustível ficaram «Disponível» por defeito.`);
+    app.listen(+PORT, HOST || undefined, () => {
+      console.log(`Combustível por Perto a correr em http://localhost:${PORT}`);
+      console.log('Deixe esta janela aberta. Para desligar o portal, feche-a ou carregue em Ctrl + C.');
+    });
+  })().catch(e => { console.error('O portal não arrancou:', e.message); process.exit(1); });
+}

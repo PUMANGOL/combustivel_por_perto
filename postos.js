@@ -13,8 +13,8 @@ function daPagina() {
 const INCLUIDOS = new Set(daPagina());
 module.exports = {
   /* códigos válidos neste momento */
-  validos(armazem) {
-    const t = armazem.listar('postos');
+  async validos(armazem) {
+    const t = await armazem.listar('postos');
     return t.length ? new Set(t.map(r => String(r.dados.id))) : INCLUIDOS;
   },
 };

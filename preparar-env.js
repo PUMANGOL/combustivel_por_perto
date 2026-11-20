@@ -1,14 +1,15 @@
 /* Prepara a configuração antes de tudo o resto:
    - se não existir .env, cria-o a partir de .env.example;
    - se a chave secreta (JWT_SECRET) estiver vazia, gera uma nova.
-   Assim, quem instala não precisa de editar nada para começar. */
+   Assim, quem instala não precisa de editar nada para começar.
+   Na Vercel não há .env (o disco é só de leitura): a configuração vem das variáveis de ambiente do projecto. */
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const pasta = __dirname, env = path.join(pasta, '.env'), modelo = path.join(pasta, '.env.example');
-try {
+if (!process.env.VERCEL) try {
   if (!fs.existsSync(env) && fs.existsSync(modelo)) fs.copyFileSync(modelo, env);
   if (fs.existsSync(env)) {
     const txt = fs.readFileSync(env, 'utf8');
@@ -20,4 +21,5 @@ try {
     }
   }
 } catch (e) { console.warn('Não foi possível preparar o ficheiro .env:', e.message); }
-require('dotenv').config({ path: env, quiet: true });
+/* na Vercel, só as variáveis do projecto contam (um .env esquecido não pode desligar o HTTPS, por exemplo) */
+if (!process.env.VERCEL) require('dotenv').config({ path: env, quiet: true });

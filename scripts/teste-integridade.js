@@ -1,27 +1,32 @@
 /* Teste de consistência e integridade das confirmações dos postos.
    Corre um portal à parte (porta 3999) com um ficheiro de dados TEMPORÁRIO: não toca nos dados reais.
-   Uso: node scripts/teste-integridade.js */
+   Uso: node scripts/teste-integridade.js
+   Com TESTE_TURSO=1, o mesmo teste corre com o cliente Turso/libSQL (num ficheiro local), o modo usado na Vercel. */
 'use strict';
 const os = require('os'), fs = require('fs'), path = require('path'), crypto = require('crypto');
+const { pathToFileURL } = require('url');
 const { spawn, execFileSync } = require('child_process');
 
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cpp-teste-'));
 const FICH = path.join(pasta, 'teste.sqlite'), PORTA = 3999, BASE = `http://127.0.0.1:${PORTA}`;
-const ENV = { ...process.env, DADOS_FICHEIRO: FICH, PORT: String(PORTA), HOST: '127.0.0.1', COOKIE_SECURE: 'false', TRUST_PROXY: '0', JWT_SECRET: crypto.randomBytes(48).toString('hex'), LIMITE_ESCRITAS_MIN: '100000' };
+/* a base de dados é sempre a temporária: nunca a Turso nem o ficheiro indicados no .env */
+const baseTeste = f => ({ DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', VERCEL: '' });
+const ENV = { ...process.env, ...baseTeste(FICH), PORT: String(PORTA), HOST: '127.0.0.1', COOKIE_SECURE: 'false', TRUST_PROXY: '0', JWT_SECRET: crypto.randomBytes(48).toString('hex'), LIMITE_ESCRITAS_MIN: '100000' };
 const RAIZ = path.join(__dirname, '..');
 const res = []; const ok = (nome, cond, info = '') => { res.push({ nome, ok: !!cond, info }); };
 
 /* contas de teste criadas directamente no ficheiro temporário */
 function prepararContas() {
   execFileSync(process.execPath, ['-e', `
-    process.env.DADOS_FICHEIRO=${JSON.stringify(FICH)};
     const a=require(${JSON.stringify(path.join(RAIZ, 'armazem'))}), b=require('bcryptjs');
     const h=b.hashSync('SenhaTeste2026',4);
-    a.criarUtilizador({utilizador:'admin1',nome:'Admin',hash:h,perfil:'admin'});
-    a.criarUtilizador({utilizador:'gestor1',nome:'Gestor',hash:h,perfil:'gestor'});
-    a.criarUtilizador({utilizador:'posto09',nome:'TALATONA',hash:h,perfil:'posto',posto:'9'});
-    a.criarUtilizador({utilizador:'posto11',nome:'11 DE NOVEMBRO',hash:h,perfil:'posto',posto:'11'});
-    a.fechar();`], { cwd: RAIZ, env: ENV, stdio: 'pipe' });
+    (async () => {
+      await a.criarUtilizador({utilizador:'admin1',nome:'Admin',hash:h,perfil:'admin'});
+      await a.criarUtilizador({utilizador:'gestor1',nome:'Gestor',hash:h,perfil:'gestor'});
+      await a.criarUtilizador({utilizador:'posto09',nome:'TALATONA',hash:h,perfil:'posto',posto:'9'});
+      await a.criarUtilizador({utilizador:'posto11',nome:'11 DE NOVEMBRO',hash:h,perfil:'posto',posto:'11'});
+      await a.fechar();
+    })().catch(e => { console.error(e); process.exit(1); });`], { cwd: RAIZ, env: ENV, stdio: 'pipe' });
 }
 function ligar() {
   return new Promise((ok_, falha) => {
@@ -43,9 +48,11 @@ const lista = async (col, ck) => (await pedido('GET', '/api/c/' + col, undefined
 const doc = (l, id) => (l.find(x => x.id === id) || {}).dados;
 function lerDB() {
   return JSON.parse(execFileSync(process.execPath, ['-e', `
-    process.env.DADOS_FICHEIRO=${JSON.stringify(FICH)};
     const a=require(${JSON.stringify(path.join(RAIZ, 'armazem'))}), P=require(${JSON.stringify(path.join(RAIZ, 'postos'))});
-    console.log(JSON.stringify({conf:a.listar('confirmacoes'), reg:a.listar('registos'), contas:a.contas(), integ:a.integridade(P.validos(a))}));`],
+    (async () => {
+      const r = {conf:await a.listar('confirmacoes'), reg:await a.listar('registos'), contas:await a.contas(), integ:await a.integridade(await P.validos(a))};
+      await a.fechar(); console.log(JSON.stringify(r));
+    })().catch(e => { console.error(e); process.exit(1); });`],
     { cwd: RAIZ, env: ENV }).toString().trim().split('\n').pop());
 }
 
@@ -192,9 +199,12 @@ function lerDB() {
     d.exec("CREATE TABLE utilizadores (id INTEGER PRIMARY KEY AUTOINCREMENT, utilizador TEXT NOT NULL UNIQUE COLLATE NOCASE, nome TEXT NOT NULL, senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestao')), posto_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL)");
     d.exec("INSERT INTO utilizadores VALUES (7,'rufino','Rufino','HASH1','gestao',NULL,1,1),(8,'posto09','TALATONA','HASH2','posto','9',1,2),(9,'antigo','X','HASH3','gestao',NULL,0,3)"); d.close();`], { stdio: 'pipe' });
   const mig = JSON.parse(execFileSync(process.execPath, ['-e', `
-    process.env.DADOS_FICHEIRO=${JSON.stringify(velho)}; const a=require(${JSON.stringify(path.join(RAIZ, 'armazem'))});
-    const {DatabaseSync}=require('node:sqlite'); a.fechar(); const d=new DatabaseSync(${JSON.stringify(velho)});
-    console.log(JSON.stringify(d.prepare('SELECT id,utilizador,perfil,posto_id,senha_hash,activo FROM utilizadores ORDER BY id').all()));`], { cwd: RAIZ, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim().split('\n').pop());
+    const a=require(${JSON.stringify(path.join(RAIZ, 'armazem'))});
+    (async () => {
+      await a.iniciar(); await a.fechar();
+      const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(${JSON.stringify(velho)});
+      console.log(JSON.stringify(d.prepare('SELECT id,utilizador,perfil,posto_id,senha_hash,activo FROM utilizadores ORDER BY id').all()));
+    })().catch(e => { console.error(e); process.exit(1); });`], { cwd: RAIZ, env: { ...ENV, ...baseTeste(velho) }, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim().split('\n').pop());
   ok('42. Base da versão 4: «gestao» passa a «admin», o resto fica igual (ids, senhas, posto, estado)',
     JSON.stringify(mig) === JSON.stringify([{ id: 7, utilizador: 'rufino', perfil: 'admin', posto_id: null, senha_hash: 'HASH1', activo: 1 }, { id: 8, utilizador: 'posto09', perfil: 'posto', posto_id: '9', senha_hash: 'HASH2', activo: 1 }, { id: 9, utilizador: 'antigo', perfil: 'admin', posto_id: null, senha_hash: 'HASH3', activo: 0 }]), JSON.stringify(mig));
 
