@@ -12,14 +12,15 @@ fs.rmSync(saida, { recursive: true, force: true });
 fs.mkdirSync(saida, { recursive: true });
 fs.writeFileSync(path.join(saida, 'robots.txt'), 'User-agent: *\nDisallow: /api/\n');
 
+const { configTurso, resumoToken } = require('../turso-config');
 const falta = [];
-const url = String(process.env.TURSO_DATABASE_URL || '').trim(), token = String(process.env.TURSO_AUTH_TOKEN || '').trim();
+const { url, token, variavelToken, duasDiferentes } = configTurso();
 if (!url) falta.push('TURSO_DATABASE_URL');
 else if (!/^(libsql|https|wss):\/\/[A-Za-z0-9.-]+(:\d+)?\/?$/.test(url))
   falta.push(`TURSO_DATABASE_URL com formato inesperado («${url.replace(/[?#].*$/, '?…').slice(0, 80)}»): deve ser só o endereço da base de dados, como libsql://<nome>-<organização>.<região>.turso.io, sem aspas, espaços nem «?authToken=»`);
-if (!token) falta.push('TURSO_AUTH_TOKEN');
+if (!token) falta.push('o token da Turso: TURSO_DATABASE_TURSO_AUTH_TOKEN (criado pela integração) ou TURSO_AUTH_TOKEN');
 else if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token))
-  falta.push('TURSO_AUTH_TOKEN com formato inesperado: deve ser o token da base de dados (três partes separadas por pontos), sem aspas nem espaços — não o token da conta/API da Turso');
+  falta.push(`${variavelToken} com formato inesperado: deve ser o token da base de dados (três partes separadas por pontos), sem aspas nem espaços — não o token da conta/API da Turso`);
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) falta.push('JWT_SECRET (mínimo 32 caracteres)');
 if (falta.length) {
   console.error('\nFaltam variáveis de ambiente no projecto da Vercel (Settings › Environment Variables):');
@@ -28,3 +29,5 @@ if (falta.length) {
   process.exit(1);
 }
 console.log('Configuração da Vercel completa. A página e a API são servidas pela função api/index.js.');
+console.log(`Base de dados: ${url} — token: variável ${variavelToken}, ${resumoToken(token)}`);
+if (duasDiferentes) console.log('Aviso: TURSO_AUTH_TOKEN também existe, com outro valor, e é ignorado (usa-se o da integração). Pode apagá-lo.');

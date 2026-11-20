@@ -10,7 +10,7 @@ const { spawn, execFileSync } = require('child_process');
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), 'cpp-teste-'));
 const FICH = path.join(pasta, 'teste.sqlite'), PORTA = 3999, BASE = `http://127.0.0.1:${PORTA}`;
 /* a base de dados é sempre a temporária: nunca a Turso nem o ficheiro indicados no .env */
-const baseTeste = f => ({ DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', VERCEL: '' });
+const baseTeste = f => ({ DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', TURSO_DATABASE_TURSO_AUTH_TOKEN: '', VERCEL: '' });
 const ENV = { ...process.env, ...baseTeste(FICH), PORT: String(PORTA), HOST: '127.0.0.1', COOKIE_SECURE: 'false', TRUST_PROXY: '0', JWT_SECRET: crypto.randomBytes(48).toString('hex'), LIMITE_ESCRITAS_MIN: '100000' };
 const RAIZ = path.join(__dirname, '..');
 const res = []; const ok = (nome, cond, info = '') => { res.push({ nome, ok: !!cond, info }); };

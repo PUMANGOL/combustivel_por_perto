@@ -10,7 +10,7 @@ A instalação num servidor próprio (Linux ou Windows Server, `INSTALAR-SERVIDO
 |---|---|
 | Página, ficheiros e API | Uma só função, `api/index.js`, que usa o mesmo `server.js` do servidor próprio. O `vercel.json` envia todos os pedidos para ela, por isso os cabeçalhos de segurança (CSP, HSTS…) aplicam-se a tudo. |
 | Ficheiros do projecto | Não são publicados: a pasta estática da Vercel só tem um `robots.txt` (criado no build). |
-| Dados | Turso, indicada por `TURSO_DATABASE_URL` e `TURSO_AUTH_TOKEN`. As tabelas são criadas sozinhas no primeiro pedido. |
+| Dados | Turso, indicada por `TURSO_DATABASE_URL` e pelo token: `TURSO_DATABASE_TURSO_AUTH_TOKEN` (criado pela integração da Vercel; tem prioridade) ou `TURSO_AUTH_TOKEN`. As tabelas são criadas sozinhas no primeiro pedido. |
 | Tempo real | Continua por ligação SSE. A Vercel corta as ligações longas, por isso o portal renova-a a cada ~5 minutos (o navegador religa sozinho e recarrega só o que mudou). Uma alteração feita noutra instância chega aos ecrãs em até 5 segundos. |
 | Limites de tentativas e de escritas | Guardados na base de dados, para valerem em todas as instâncias. |
 | Sessões | Cookie `__Host-sessao`, só por HTTPS. |
@@ -21,8 +21,8 @@ A instalação num servidor próprio (Linux ou Windows Server, `INSTALAR-SERVIDO
 
 1. No projecto da Vercel: **Storage › Create Database › Turso** (ou **Marketplace › Turso**).
 2. Escolha uma região na Europa, a mais próxima de Angola entre as da Turso (por exemplo **AWS eu-west-1, Irlanda**).
-3. Ligue a base de dados ao projecto (todos os ambientes). A Vercel cria as variáveis `TURSO_DATABASE_URL` e `TURSO_AUTH_TOKEN`.
-4. Em **Settings › Environment Variables**, confirme que os nomes são exactamente esses dois. Se tiverem outro prefixo, crie estes dois com os mesmos valores.
+3. Ligue a base de dados ao projecto (todos os ambientes). A Vercel cria as variáveis `TURSO_DATABASE_URL` e `TURSO_DATABASE_TURSO_AUTH_TOKEN`.
+4. O portal usa estas duas tal como estão: **não crie `TURSO_AUTH_TOKEN` à mão** (se já o criou, apague-o; de qualquer forma, o token da integração tem prioridade).
 
 **Opção B: directamente na Turso**
 
@@ -36,8 +36,8 @@ Em **Settings › Environment Variables**, para **Production** e **Preview**:
 
 | Variável | Valor |
 |---|---|
-| `TURSO_DATABASE_URL` | URL da base de dados Turso (`libsql://…`) |
-| `TURSO_AUTH_TOKEN` | Token da Turso |
+| `TURSO_DATABASE_URL` | URL da base de dados Turso (`libsql://…`). Com a integração (opção A), já existe. |
+| `TURSO_AUTH_TOKEN` | Token da Turso — **só na opção B**. Com a integração, o token já está em `TURSO_DATABASE_TURSO_AUTH_TOKEN`. |
 | `JWT_SECRET` | Chave secreta das sessões, nova e só para a Vercel. Gere-a no PC com: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 
 Opcionais: `LIMITE_ESCRITAS_MIN` (predefinição 120) e `SSE_DURACAO_SEG` (predefinição 280; ver «Problemas»).
@@ -57,7 +57,7 @@ Em **Settings › Build and Deployment**:
 Em **Settings › Functions**:
 
 - **Fluid compute**: ligado (é o normal em projectos novos). É o que permite ligações de tempo real até 300 segundos.
-- **Function Region**: a região da Vercel junto da base de dados Turso (Irlanda: **Dublin, dub1**; Frankfurt: **fra1**). Cada pedido fala várias vezes com a base de dados; com as duas na mesma região o portal responde mais depressa.
+- **Function Region**: a região da Vercel junto da base de dados Turso (EUA Leste, `aws-us-east-1`: **Washington, iad1**, a predefinição; Irlanda: **Dublin, dub1**; Frankfurt: **fra1**). Cada pedido fala várias vezes com a base de dados; com as duas na mesma região o portal responde mais depressa.
 
 ## 4. Publicar
 

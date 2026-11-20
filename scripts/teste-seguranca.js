@@ -18,7 +18,7 @@ const titulo = g => { grupo = g; };
 function ambiente(porta, extra = {}) {
   /* a base de dados é sempre a temporária: nunca a Turso nem o ficheiro indicados no .env */
   const f = path.join(pasta, `d${porta}.sqlite`);
-  return { ...process.env, DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', VERCEL: '',
+  return { ...process.env, DADOS_FICHEIRO: f, TURSO_DATABASE_URL: process.env.TESTE_TURSO ? pathToFileURL(f).href : '', TURSO_AUTH_TOKEN: '', TURSO_DATABASE_TURSO_AUTH_TOKEN: '', VERCEL: '',
     PORT: String(porta), HOST: '127.0.0.1', COOKIE_SECURE: 'false', TRUST_PROXY: 'loopback', JWT_SECRET: SEGREDO, LIMITE_ESCRITAS_MIN: '100000', ...extra };
 }
 function contas(env) {

@@ -7,8 +7,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { configTurso, resumoToken } = require('./turso-config');
 
-const TURSO_URL = String(process.env.TURSO_DATABASE_URL || '').trim();
+const TURSO_URL = configTurso().url;
 
 /* ---------- ligação: ficheiro local (node:sqlite) ---------- */
 function ligarFicheiro() {
@@ -61,24 +62,11 @@ function ligarFicheiro() {
 }
 
 /* ---------- ligação: Turso / libSQL ---------- */
-/* resumo do token, para comparar o que está na Vercel com o que funciona no PC sem o mostrar:
-   impressão digital curta (SHA-256) e a data de criação que vem dentro do próprio token */
-function resumoToken(token) {
-  if (!token) return 'nenhum token definido';
-  let txt = 'impressão ' + require('crypto').createHash('sha256').update(token).digest('hex').slice(0, 8);
-  try {
-    const p = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
-    const data = s => new Date(s * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-    if (p.iat) txt += ', criado em ' + data(p.iat);
-    if (p.exp) txt += ', expira em ' + data(p.exp);
-    if (p.a) txt += ', acesso ' + p.a;
-  } catch (_) { /* não é um token no formato habitual */ }
-  return txt;
-}
 function ligarTurso(url) {
   /* na Vercel usa-se o cliente só por HTTP (sem módulos nativos); «file:» serve para testar este modo localmente */
   const { createClient } = url.startsWith('file:') ? require('@libsql/client') : require('@libsql/client/web');
-  const token = String(process.env.TURSO_AUTH_TOKEN || '').trim();
+  const { token, variavelToken } = configTurso();
+  const sobreToken = resumoToken(token) + (variavelToken ? ` (variável ${variavelToken})` : '');
   /* a biblioteca descarta o texto dos erros HTTP da Turso (por exemplo, base de dados inexistente ou token recusado):
      fica no registo, para se saber a causa. As sondagens de versão (GET) que falham são normais e não se registam. */
   const fetchComErros = async (pedido, ...resto) => {
@@ -87,7 +75,7 @@ function ligarTurso(url) {
     if (!r.ok && metodo !== 'GET') {
       try { console.error(`Turso respondeu HTTP ${r.status}: ${(await r.clone().text()).slice(0, 400) || '(sem texto)'}`); } catch (_) {}
       if (r.status === 401 || r.status === 403)
-        console.error(`Ligação usada: ${url.replace(/[?#].*$/, '')} — token: ${resumoToken(token)}. Compare com «node scripts/verificar.js» no PC.`);
+        console.error(`Ligação usada: ${url.replace(/[?#].*$/, '')} — token: ${sobreToken}. Compare com «node scripts/verificar.js» no PC.`);
     }
     return r;
   };
@@ -95,7 +83,7 @@ function ligarTurso(url) {
   const objectos = rs => rs.rows.map(r => Object.fromEntries(rs.columns.map((k, i) => [k, r[i]])));
   return {
     descricao: 'Turso ' + url.replace(/[?#].*$/, ''),
-    token: resumoToken(token),
+    token: sobreToken,
     remota: true,
     todos: async (sql, a = []) => objectos(await c.execute({ sql, args: a })),
     um: async (sql, a = []) => objectos(await c.execute({ sql, args: a }))[0],
@@ -107,7 +95,7 @@ function ligarTurso(url) {
 }
 
 if (!TURSO_URL && process.env.VERCEL) {
-  console.error('Na Vercel os dados não podem ficar num ficheiro: ligue uma base de dados Turso e defina TURSO_DATABASE_URL e TURSO_AUTH_TOKEN (ver VERCEL.md).');
+  console.error('Na Vercel os dados não podem ficar num ficheiro: ligue uma base de dados Turso (Storage › Turso) ou defina TURSO_DATABASE_URL e TURSO_AUTH_TOKEN (ver VERCEL.md).');
   process.exit(1);
 }
 const base = TURSO_URL ? ligarTurso(TURSO_URL) : ligarFicheiro();
