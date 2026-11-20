@@ -1,0 +1,4 @@
+# Combustível por Perto — cópia de segurança diária às 02:00 (crontab do utilizador «cpp»)
+0 2 * * * cd /opt/combustivel-por-perto && /usr/bin/node scripts/copia-seguranca.js >> /opt/combustivel-por-perto/copias/copias.log 2>&1
+# Apagar cópias com mais de 30 dias
+30 2 * * * find /opt/combustivel-por-perto/copias -name 'via-abastece-*.sqlite' -mtime +30 -delete

@@ -1,0 +1,18 @@
+# Combustível por Perto — configuração de produção
+# Copiar para .env na pasta do portal e proteger: chmod 600 .env (dono: o utilizador do serviço)
+
+# Chave secreta das sessões. Se ficar vazia, o portal gera uma no primeiro arranque.
+JWT_SECRET=
+
+PORT=3000
+# Só aceita ligações do proxy (Nginx/IIS) na própria máquina
+HOST=127.0.0.1
+# Endereço real do visitante: confiar só no proxy da própria máquina.
+# Se o proxy estiver noutra máquina, indique o IP dele (por exemplo 10.0.0.5).
+TRUST_PROXY=loopback
+# Cookies só por HTTPS (__Host-sessao, Secure) e HSTS
+COOKIE_SECURE=true
+# Ficheiro de dados (contas, confirmações, histórico e auditoria)
+DADOS_FICHEIRO=dados/via-abastece.sqlite
+# Máximo de escritas por minuto por visitante
+LIMITE_ESCRITAS_MIN=120
