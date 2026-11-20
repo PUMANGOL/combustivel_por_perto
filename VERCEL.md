@@ -9,7 +9,7 @@ A instalação num servidor próprio (Linux ou Windows Server, `INSTALAR-SERVIDO
 | Peça | Na Vercel |
 |---|---|
 | Página, ficheiros e API | Uma só função, `api/index.js`, que usa o mesmo `server.js` do servidor próprio. O `vercel.json` envia todos os pedidos para ela, por isso os cabeçalhos de segurança (CSP, HSTS…) aplicam-se a tudo. |
-| Ficheiros do projecto | Não são publicados: a pasta estática da Vercel fica vazia de propósito. |
+| Ficheiros do projecto | Não são publicados: a pasta estática da Vercel só tem um `robots.txt` (criado no build). |
 | Dados | Turso, indicada por `TURSO_DATABASE_URL` e `TURSO_AUTH_TOKEN`. As tabelas são criadas sozinhas no primeiro pedido. |
 | Tempo real | Continua por ligação SSE. A Vercel corta as ligações longas, por isso o portal renova-a a cada ~5 minutos (o navegador religa sozinho e recarrega só o que mudou). Uma alteração feita noutra instância chega aos ecrãs em até 5 segundos. |
 | Limites de tentativas e de escritas | Guardados na base de dados, para valerem em todas as instâncias. |
