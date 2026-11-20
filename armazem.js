@@ -64,7 +64,17 @@ function ligarFicheiro() {
 function ligarTurso(url) {
   /* na Vercel usa-se o cliente só por HTTP (sem módulos nativos); «file:» serve para testar este modo localmente */
   const { createClient } = url.startsWith('file:') ? require('@libsql/client') : require('@libsql/client/web');
-  const c = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN || undefined });
+  /* a biblioteca descarta o texto dos erros HTTP da Turso (por exemplo, base de dados inexistente ou token recusado):
+     fica no registo, para se saber a causa. As sondagens de versão (GET) que falham são normais e não se registam. */
+  const fetchComErros = async (pedido, ...resto) => {
+    const r = await fetch(pedido, ...resto);
+    const metodo = (pedido && pedido.method) || (resto[0] && resto[0].method) || 'GET';
+    if (!r.ok && metodo !== 'GET') {
+      try { console.error(`Turso respondeu HTTP ${r.status}: ${(await r.clone().text()).slice(0, 400) || '(sem texto)'}`); } catch (_) {}
+    }
+    return r;
+  };
+  const c = createClient({ url, authToken: String(process.env.TURSO_AUTH_TOKEN || '').trim() || undefined, fetch: fetchComErros });
   const objectos = rs => rs.rows.map(r => Object.fromEntries(rs.columns.map((k, i) => [k, r[i]])));
   return {
     descricao: 'Turso ' + url.replace(/[?#].*$/, ''),

@@ -13,8 +13,13 @@ fs.mkdirSync(saida, { recursive: true });
 fs.writeFileSync(path.join(saida, 'robots.txt'), 'User-agent: *\nDisallow: /api/\n');
 
 const falta = [];
-if (!process.env.TURSO_DATABASE_URL) falta.push('TURSO_DATABASE_URL');
-if (!process.env.TURSO_AUTH_TOKEN) falta.push('TURSO_AUTH_TOKEN');
+const url = String(process.env.TURSO_DATABASE_URL || '').trim(), token = String(process.env.TURSO_AUTH_TOKEN || '').trim();
+if (!url) falta.push('TURSO_DATABASE_URL');
+else if (!/^(libsql|https|wss):\/\/[A-Za-z0-9.-]+(:\d+)?\/?$/.test(url))
+  falta.push(`TURSO_DATABASE_URL com formato inesperado («${url.replace(/[?#].*$/, '?…').slice(0, 80)}»): deve ser só o endereço da base de dados, como libsql://<nome>-<organização>.<região>.turso.io, sem aspas, espaços nem «?authToken=»`);
+if (!token) falta.push('TURSO_AUTH_TOKEN');
+else if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token))
+  falta.push('TURSO_AUTH_TOKEN com formato inesperado: deve ser o token da base de dados (três partes separadas por pontos), sem aspas nem espaços — não o token da conta/API da Turso');
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) falta.push('JWT_SECRET (mínimo 32 caracteres)');
 if (falta.length) {
   console.error('\nFaltam variáveis de ambiente no projecto da Vercel (Settings › Environment Variables):');

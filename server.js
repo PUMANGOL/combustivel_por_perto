@@ -81,7 +81,12 @@ function preparar() {
     return sincronizarPostos();
   })().catch(e => { preparado = null; throw e; }));
 }
-app.use((req, res, next) => { preparar().then(() => next(), next); });
+app.use((req, res, next) => {
+  preparar().then(() => next(), e => {
+    console.error('A base de dados não respondeu ao preparar o portal.' + (armazem.remota ? ' Confirme TURSO_DATABASE_URL e TURSO_AUTH_TOKEN (VERCEL.md › Problemas).' : ''));
+    next(e);
+  });
+});
 
 /* limite geral de escritas por IP (protege contra abusos e scripts em ciclo).
    Os contadores ficam na base de dados, para valerem em todas as instâncias do portal. */

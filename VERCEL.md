@@ -99,7 +99,9 @@ Depois entre no portal com essa conta e crie as contas de posto e de gestor no s
 |---|---|
 | O build pára com «Faltam variáveis de ambiente» | Defina as variáveis do passo 2 (também para *Preview*, se publicar outros branches) e faça **Redeploy**. |
 | Erro de deploy sobre `maxDuration` | O plano não permite 300 segundos (Fluid compute desligado). Ligue o Fluid compute, ou mude `maxDuration` para `60` no `vercel.json` e defina `SSE_DURACAO_SEG=50`. |
-| A página abre mas dá «Erro no servidor» | Veja **Logs** no projecto da Vercel. Normalmente é o URL ou o token da Turso errado ou expirado. |
+| A página abre mas dá «Erro no servidor» | Veja **Logs** no projecto da Vercel. A linha `Turso respondeu HTTP …` mostra a resposta da Turso. Normalmente é o URL ou o token da Turso errado ou expirado. |
+| `Turso respondeu HTTP 400` com «Namespace … does not exist» (ou outro texto sobre a base de dados) | O `TURSO_DATABASE_URL` não aponta para uma base de dados que exista: copie de novo o URL da base de dados (no painel da Turso, ou o que a integração da Vercel criou). |
+| `Turso respondeu HTTP 401` | Token recusado: crie um token novo para a base de dados (leitura e escrita) e substitua o `TURSO_AUTH_TOKEN`. |
 | Mudanças demoram uns segundos a aparecer noutros ecrãs | Normal na Vercel: até 5 segundos quando a alteração foi feita noutra instância. |
 
 ## Consumo
