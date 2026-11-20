@@ -16,7 +16,8 @@ const ok = t => console.log('  ✓ ' + t), mal = t => console.log('  ✗ ' + t),
   else ok('chave secreta (JWT_SECRET) preenchida');
   let armazem;
   try { armazem = require('../armazem'); await armazem.iniciar(); ok((armazem.remota ? 'base de dados: ' : 'ficheiro de dados: ') + armazem.ficheiro); }
-  catch (x) { falhas++; mal('não foi possível abrir a base de dados'); nota(x.message); armazem = null; }
+  catch (x) { falhas++; mal('não foi possível abrir a base de dados'); nota(x.message); if (armazem && armazem.remota) nota('token: ' + armazem.token); armazem = null; }
+  if (armazem && armazem.remota) ok('token: ' + armazem.token + '  (o registo da Vercel deve mostrar a mesma impressão)');
   if (armazem) {
     ok(`confirmações guardadas: ${await armazem.contar('confirmacoes')} (a última de cada posto e combustível)`);
     const contas = (await armazem.contas()).filter(c => c.activo), n = p => contas.filter(c => c.perfil === p).length;
