@@ -1,4 +1,4 @@
-# Combustível por Perto · Pumangol — versão 5.13
+# Combustível por Perto · Pumangol — versão 6.0
 
 Portal onde os clientes vêem em que postos Pumangol há gasolina e gasóleo. Endereço de produção: **https://combustivel.por.perto.pumangol.co.ao**. A instalação no servidor está descrita em **INSTALAR-SERVIDOR.md**.
 
@@ -12,17 +12,20 @@ Portal onde os clientes vêem em que postos Pumangol há gasolina e gasóleo. En
 - No fim da página, por cima do QR Code e em letra pequena, uma **nota** a salvaguardar a Pumangol: a informação é actualizada periodicamente e a disponibilidade deve ser confirmada no momento do abastecimento.
 - Loja de Conveniência e outros serviços sempre disponíveis.
 
-## Perfis
+## Perfis e acesso
+
+O **utilizador é o email**. As contas da folha **«Perfis de Acesso»** já vêm no ficheiro `deploy/perfis-acesso.csv` (113 contas: 2 admin, 9 gestores, 19 visualizadores e 83 postos).
 
 | Perfil | Vê | Faz |
 |---|---|---|
-| **Posto** | Consulta, Posto, Estado da Rede **de toda a rede** e Histórico **do seu posto** | Confirma só o seu posto |
-| **Gestor** | Consulta, Posto, Estado da Rede e Histórico de toda a rede | Confirma qualquer posto; **fica gravado o nome do gestor** |
-| **Admin** | Tudo, incluindo **Gestão** | Cria contas, altera perfis, repõe senhas, lista de postos e **confirma toda a rede de uma só vez** (Estado da Rede) |
+| **Posto** | Consulta, Posto, Estado da Rede (toda a rede) e Histórico do seu posto | Confirma só o seu posto |
+| **Gestor** | Consulta, Posto, Estado da Rede e Histórico de toda a rede | Confirma qualquer posto; fica gravado o nome do gestor |
+| **Visualizador** | Consulta, Posto, Estado da Rede e Histórico de toda a rede | **Só consulta**: não envia confirmações |
+| **Admin** | Tudo, incluindo **Gestão** | Cria contas, gera códigos de acesso, altera perfis, confirma a rede toda, auditoria |
 
-**As contas criam-se uma só vez e mantêm-se nas actualizações do portal.** Só o admin as altera, no separador Gestão. A primeira conta de admin cria-se com **Criar conta de administrador.bat**, que só funciona enquanto não existir nenhum admin.
+**Primeiro acesso:** cada conta nova recebe um **código de acesso** pessoal (válido 30 dias). No portal, em **Entrar › Primeiro acesso**, a pessoa indica o email, o código e grava a sua própria senha. O admin nunca conhece as senhas. Se alguém esquecer a senha, o admin usa **«Repor acesso (novo código)»**.
 
-No **Estado da Rede**, os três estados aparecem com as suas cores: **Disponível** (verde), **Indisponível** (vermelho) e **Por confirmar**.
+**As contas criam-se uma só vez e mantêm-se nas actualizações do portal.** A importação só cria as contas que ainda não existem.
 
 ## Histórico
 
@@ -46,19 +49,20 @@ O portal impede combinações erradas, no ecrã e no servidor. Cada confirmaçã
 Precisa do **Node.js 22.13 ou superior** (versão LTS em nodejs.org).
 
 1. Extraia o ZIP para uma pasta nova, por exemplo `Documentos › Combustivel por Perto`.
-2. Dois cliques em **Criar conta de administrador.bat** (da primeira vez, prepara o portal sozinho).
-3. Dois cliques em **Ligar portal.bat** e abra **http://localhost:3000**. Entre com a conta de admin.
-4. No separador **Gestão**, crie uma conta de **posto** (escolha o posto e a senha) e uma de **gestor**.
+2. Dois cliques em **Importar perfis de acesso.bat**: cria as 113 contas e grava os códigos de primeiro acesso num ficheiro na pasta `copias`.
+3. Dois cliques em **Ligar portal.bat** e abra **http://localhost:3000**.
+4. Clique em **Entrar › Primeiro acesso**, indique o seu email e o seu código, e grave a sua senha.
 
 ## Ficheiros desta pasta
 
 | Ficheiro | Para quê |
 |---|---|
-| `Criar conta de administrador.bat` | primeira conta de admin |
+| `Importar perfis de acesso.bat` | cria as contas do ficheiro `deploy/perfis-acesso.csv` e gera os códigos de primeiro acesso |
+| `Criar conta de administrador.bat` | (emergência) primeira conta de admin, se não usar a importação |
 | `Ligar portal.bat` | liga o portal |
 | `Verificar.bat` | confirma a configuração, as contas e a integridade dos dados |
 | `Teste de integridade.bat` | teste automático da gravação das confirmações (62 verificações, com dados temporários) |
-| `Teste de seguranca.bat` | teste de segurança automático (92 verificações, com dados temporários) |
+| `Teste de seguranca.bat` | teste de segurança automático (115 verificações, com dados temporários) |
 | `Copia de seguranca.bat` | cópia dos dados para a pasta `copias` |
 | `dados/` | contas e confirmações: **não apague** |
 

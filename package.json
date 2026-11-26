@@ -1,6 +1,6 @@
 {
   "name": "combustivel-por-perto",
-  "version": "5.13.0",
+  "version": "6.0.0",
   "private": true,
   "description": "Combustível por Perto (Pumangol) — onde há gasolina e gasóleo na rede Pumangol",
   "main": "server.js",
@@ -11,7 +11,8 @@
     "copia": "node scripts/copia-seguranca.js",
     "repor-senha": "node scripts/repor-senha.js",
     "teste-integridade": "node scripts/teste-integridade.js",
-    "teste-seguranca": "node scripts/teste-seguranca.js"
+    "teste-seguranca": "node scripts/teste-seguranca.js",
+    "importar-perfis": "node scripts/importar-perfis.js perfis-acesso.csv"
   },
   "engines": {
     "node": ">=22.13"

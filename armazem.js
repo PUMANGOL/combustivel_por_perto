@@ -29,27 +29,27 @@ for (const t of TABELAS) {
     actualizado_em INTEGER NOT NULL, actualizado_por INTEGER)`);
 }
 db.exec(`CREATE INDEX IF NOT EXISTS ix_conf_posto ON confirmacoes (posto, prod);
-  CREATE INDEX IF NOT EXISTS ix_runouts_posto ON runouts (posto, prod);
-  CREATE TABLE IF NOT EXISTS utilizadores (
+  CREATE INDEX IF NOT EXISTS ix_runouts_posto ON runouts (posto, prod);`);
+/* contas: perfis posto / gestor / visualizador / admin; «pendente» = à espera do primeiro acesso (código de activação) */
+const ESQUEMA_CONTAS = `(
     id INTEGER PRIMARY KEY AUTOINCREMENT, utilizador TEXT NOT NULL UNIQUE COLLATE NOCASE, nome TEXT NOT NULL,
-    senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestor','admin')), posto_id TEXT,
-    activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL)`);
-/* versões anteriores (perfis posto/gestao): converter uma única vez, mantendo ids, senhas e estado.
-   «gestao» tinha acesso total, por isso passa a «admin». Nada mais é alterado. */
+    senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestor','visualizador','admin')), posto_id TEXT,
+    activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL,
+    pendente INTEGER NOT NULL DEFAULT 0, activacao_hash TEXT, activacao_expira INTEGER)`;
+db.exec(`CREATE TABLE IF NOT EXISTS utilizadores ${ESQUEMA_CONTAS}`);
+/* bases de versões anteriores: converter uma única vez, mantendo ids, utilizadores, nomes, senhas, perfis, postos e estado.
+   (v4: «gestao» tinha acesso total e passa a «admin».) Nenhuma conta é apagada. */
 {
   const def = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='utilizadores'").get();
-  if (def && /'gestao'/.test(def.sql)) {
+  if (def && !/'visualizador'/.test(def.sql)) {
     db.exec(`BEGIN IMMEDIATE;
-      CREATE TABLE utilizadores_v5 (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, utilizador TEXT NOT NULL UNIQUE COLLATE NOCASE, nome TEXT NOT NULL,
-        senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestor','admin')), posto_id TEXT,
-        activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL);
-      INSERT INTO utilizadores_v5 (id, utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em)
-        SELECT id, utilizador, nome, senha_hash, CASE perfil WHEN 'gestao' THEN 'admin' ELSE perfil END, posto_id, activo, criado_em FROM utilizadores;
+      CREATE TABLE utilizadores_v6 ${ESQUEMA_CONTAS};
+      INSERT INTO utilizadores_v6 (id, utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em, pendente)
+        SELECT id, utilizador, nome, senha_hash, CASE perfil WHEN 'gestao' THEN 'admin' ELSE perfil END, posto_id, activo, criado_em, 0 FROM utilizadores;
       DROP TABLE utilizadores;
-      ALTER TABLE utilizadores_v5 RENAME TO utilizadores;
+      ALTER TABLE utilizadores_v6 RENAME TO utilizadores;
       COMMIT;`);
-    console.log('Contas convertidas para os perfis posto / gestor / admin (as contas de gestão passaram a admin).');
+    console.log('Contas convertidas para a versão 6 (perfis posto / gestor / visualizador / admin). Nenhuma conta foi alterada.');
   }
 }
 /* registo de auditoria: acções sobre contas, sessões e dados (só acrescenta; guarda as 20 000 mais recentes) */
@@ -88,12 +88,21 @@ module.exports = {
   apagar(t, id) { db.prepare(`DELETE FROM ${ok(t)} WHERE id = ?`).run(id); },
   contar(t) { return db.prepare(`SELECT COUNT(*) AS n FROM ${ok(t)}`).get().n; },
   utilizador(nome) {
-    return db.prepare('SELECT id, utilizador, nome, senha_hash, perfil, posto_id FROM utilizadores WHERE utilizador = ? AND activo = 1').get(String(nome).trim());
+    return db.prepare('SELECT id, utilizador, nome, senha_hash, perfil, posto_id, pendente, activacao_hash, activacao_expira FROM utilizadores WHERE utilizador = ? AND activo = 1').get(String(nome).trim());
   },
   /* só cria: uma conta existente nunca é alterada por aqui (perfis só mudam por acção do admin) */
-  criarUtilizador({ utilizador, nome, hash, perfil, posto }) {
-    db.prepare(`INSERT INTO utilizadores (utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em) VALUES (?, ?, ?, ?, ?, 1, ?)`)
-      .run(utilizador, nome, hash, perfil, posto ?? null, Date.now());
+  criarUtilizador({ utilizador, nome, hash, perfil, posto, activacaoHash = null, expira = null }) {
+    db.prepare(`INSERT INTO utilizadores (utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em, pendente, activacao_hash, activacao_expira)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`)
+      .run(utilizador, nome, hash, perfil, posto ?? null, Date.now(), activacaoHash ? 1 : 0, activacaoHash, expira);
+  },
+  /* novo código de primeiro acesso: a senha anterior deixa de servir até a pessoa definir uma nova */
+  definirActivacao(u, senhaInutil, activacaoHash, expira) {
+    return db.prepare('UPDATE utilizadores SET senha_hash = ?, pendente = 1, activacao_hash = ?, activacao_expira = ? WHERE utilizador = ?')
+      .run(senhaInutil, activacaoHash, expira, String(u)).changes > 0;
+  },
+  activar(u, hash) {
+    return db.prepare('UPDATE utilizadores SET senha_hash = ?, pendente = 0, activacao_hash = NULL, activacao_expira = NULL WHERE utilizador = ?').run(hash, String(u)).changes > 0;
   },
   alterarPerfil(u, perfil, posto) {
     return db.prepare('UPDATE utilizadores SET perfil = ?, posto_id = ? WHERE utilizador = ?').run(perfil, posto ?? null, String(u)).changes > 0;
@@ -189,7 +198,7 @@ module.exports = {
     for (const d of dup) prob.push(`posto ${d.posto} ${d.prod}: ${d.n} confirmações (devia ser 1)`);
     return { ok: prob.length === 0, problemas: prob, confirmacoes: conf.size };
   },
-  porId(id) { return db.prepare('SELECT id, utilizador, nome, perfil, posto_id, activo, senha_hash FROM utilizadores WHERE id = ?').get(Number(id)); },
+  porId(id) { return db.prepare('SELECT id, utilizador, nome, perfil, posto_id, activo, senha_hash, pendente FROM utilizadores WHERE id = ?').get(Number(id)); },
   auditar(accao, { conta = null, utilizador = null, detalhe = null, ip = null } = {}) {
     try {
       const r = db.prepare('INSERT INTO auditoria (hora, accao, conta, utilizador, detalhe, ip) VALUES (?, ?, ?, ?, ?, ?)')
@@ -201,7 +210,7 @@ module.exports = {
   auditoria(limite = 200) {
     return db.prepare('SELECT hora, accao, utilizador, detalhe, ip FROM auditoria ORDER BY seq DESC LIMIT ?').all(Math.min(1000, Math.max(1, Number(limite) || 200)));
   },
-  porNome(u) { return db.prepare('SELECT id, utilizador, nome, perfil, posto_id, activo FROM utilizadores WHERE utilizador = ?').get(String(u)); },
+  porNome(u) { return db.prepare('SELECT id, utilizador, nome, perfil, posto_id, activo, pendente FROM utilizadores WHERE utilizador = ?').get(String(u)); },
   existeUtilizador(u) { return !!db.prepare('SELECT 1 FROM utilizadores WHERE utilizador = ?').get(String(u)); },
   mudarSenha(u, hash) { return db.prepare('UPDATE utilizadores SET senha_hash = ? WHERE utilizador = ?').run(hash, String(u)).changes > 0; },
   estadoConta(u, activo) { return db.prepare('UPDATE utilizadores SET activo = ? WHERE utilizador = ?').run(activo ? 1 : 0, String(u)).changes > 0; },
@@ -209,7 +218,7 @@ module.exports = {
     return db.prepare('UPDATE utilizadores SET activo = 0 WHERE utilizador = ?').run(utilizador).changes;
   },
   contas() {
-    return db.prepare('SELECT utilizador, nome, perfil, posto_id, activo FROM utilizadores ORDER BY perfil, utilizador').all();
+    return db.prepare('SELECT utilizador, nome, perfil, posto_id, activo, pendente, activacao_expira FROM utilizadores ORDER BY perfil, utilizador').all();
   },
   /* cópia de segurança consistente, mesmo com o portal ligado */
   copiar(destino) { db.exec(`VACUUM INTO '${String(destino).replace(/'/g, "''")}'`); },

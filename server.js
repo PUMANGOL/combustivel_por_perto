@@ -1,4 +1,4 @@
-/* Combustível por Perto (Pumangol) — servidor, versão 5.7: independente de outras bases de dados.
+/* Combustível por Perto (Pumangol) — servidor, versão 6.0: independente de outras bases de dados.
    As confirmações dos postos ficam num ficheiro local; cada nova confirmação substitui a anterior.
    Serve o portal (public/), guarda os dados em dados/via-abastece.sqlite e envia as
    alterações em tempo real (SSE) a todos os ecrãs abertos. */
@@ -13,6 +13,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const armazem = require('./armazem');
 const postos = require('./postos');
+const contas = require('./contas');
 
 const {
   PORT = 3000,
@@ -32,8 +33,10 @@ const COLS = {
   registos:     { tabela: 'registos',     ler: 'posto',   escrever: null,    chaves: true },
   config:       { tabela: 'config',       ler: 'publico', escrever: 'admin', chaves: false }
 };
-const NIVEL = { publico: 0, posto: 1, gestor: 2, admin: 3 };
-const PERFIS = ['posto', 'gestor', 'admin'];
+const NIVEL = { publico: 0, posto: 1, visualizador: 2, gestor: 2, admin: 3 };
+const PERFIS = contas.PERFIS;
+/* quem pode enviar confirmações: o visualizador só consulta */
+const PODE_CONFIRMAR = ['posto', 'gestor', 'admin'];
 const nivelDe = u => (u ? NIVEL[u.perfil] || 0 : 0);
 const ID_OK = /^[A-Za-z0-9_.:-]{1,100}$/;
 
@@ -85,7 +88,7 @@ function sessao(req, _res, next) {
     try {
       const u = jwt.verify(t, JWT_SECRET, { algorithms: ['HS256'] }), c = armazem.porId(u.id);
       /* conta desactivada, apagada, com perfil/posto alterado ou com senha mudada: a sessão deixa de valer */
-      if (c && c.activo && c.perfil === u.perfil && String(c.posto_id ?? '') === String(u.posto ?? '') && u.sv === versaoSenha(c.senha_hash))
+      if (c && c.activo && !c.pendente && c.perfil === u.perfil && String(c.posto_id ?? '') === String(u.posto ?? '') && u.sv === versaoSenha(c.senha_hash))
         req.u = { id: u.id, nome: u.nome, perfil: u.perfil, posto: u.posto, utilizador: c.utilizador };
     } catch (_) { /* sessão inválida ou expirada */ }
   }
@@ -119,13 +122,13 @@ const HASH_FALSO = bcrypt.hashSync(crypto.randomBytes(12).toString('hex'), 12); 
 app.post('/api/entrar', soPortal, limiteLogin, async (req, res) => {
   const { utilizador, senha } = req.body || {};
   if (typeof utilizador !== 'string' || typeof senha !== 'string') return res.status(400).json({ erro: 'Indique utilizador e senha.' });
-  if (utilizador.length > 80 || senha.length > 200) return res.status(400).json({ erro: 'Utilizador ou senha incorrectos.' });
+  if (utilizador.length > 120 || senha.length > 200) return res.status(400).json({ erro: 'Email ou senha incorrectos.' });
   const u = armazem.utilizador(utilizador);
   const certa = await bcrypt.compare(senha, u ? u.senha_hash : HASH_FALSO);
-  if (!u || !certa) {
+  if (!u || !certa || u.pendente) {
     falhou(falhasIp, req.ip); falhou(falhasConta, utilizador.trim().toLowerCase().slice(0, 40));
     armazem.auditar('entrada_falhada', { utilizador: utilizador.slice(0, 40), ip: req.ip });
-    return res.status(401).json({ erro: 'Utilizador ou senha incorrectos.' });
+    return res.status(401).json({ erro: 'Email ou senha incorrectos. Se é o seu primeiro acesso, use «Primeiro acesso» com o código que recebeu.' });
   }
   falhasConta.delete(utilizador.trim().toLowerCase().slice(0, 40));
   const dados = { id: u.id, nome: u.nome, perfil: u.perfil, posto: u.posto_id, utilizador: u.utilizador, sv: versaoSenha(u.senha_hash) };
@@ -170,29 +173,58 @@ const UTIL_OK = /^[A-Za-z0-9._-]{3,40}$/;
 const nomeValido = n => typeof n === 'string' && n.trim().length > 0 && n.length <= 80 && !/[<>\u0000-\u001f\u007f]/.test(n);
 const senhaInvalida = s => typeof s !== 'string' || s.length < 10 ? 'A senha tem de ter pelo menos 10 caracteres.'
   : Buffer.byteLength(s, 'utf8') > 72 ? 'A senha é demasiado longa (máximo 72 caracteres).' : null;
-const contaPublica = c => ({ utilizador: c.utilizador, nome: c.nome, perfil: c.perfil, posto_id: c.posto_id, activo: !!c.activo });
+const contaPublica = c => ({ utilizador: c.utilizador, nome: c.nome, perfil: c.perfil, posto_id: c.posto_id, activo: !!c.activo, pendente: !!c.pendente, expira: c.activacao_expira || null });
 app.get('/api/contas', exige('admin'), (_req, res) => res.set('Cache-Control', 'no-store').json(armazem.contas().map(contaPublica)));
 app.post('/api/contas', soPortal, exige('admin'), async (req, res) => {
-  const { utilizador, nome, perfil, posto, senha } = req.body || {};
-  if (typeof utilizador !== 'string' || !UTIL_OK.test(utilizador)) return res.status(400).json({ erro: 'Utilizador inválido: use 3 a 40 letras, números, ponto, hífen ou sublinhado, sem espaços.' });
+  const { utilizador, nome, perfil, posto } = req.body || {};
+  const email = typeof utilizador === 'string' ? utilizador.trim().toLowerCase() : '';
+  if (!contas.EMAIL_OK.test(email) || email.length > 120) return res.status(400).json({ erro: 'Indique um email válido: é o utilizador para entrar no portal.' });
   if (!nomeValido(nome)) return res.status(400).json({ erro: 'Indique o nome a mostrar (até 80 caracteres, sem < nem >).' });
   if (!PERFIS.includes(perfil)) return res.status(400).json({ erro: 'Perfil inválido.' });
-  if (perfil === 'posto' && !postos.validos(armazem).has(String(posto))) return res.status(400).json({ erro: 'Esse posto não existe na lista de postos.' });
-  if (perfil === 'posto' && !(typeof posto === 'string' || typeof posto === 'number') || perfil === 'posto' && !String(posto).trim()) return res.status(400).json({ erro: 'Escolha o posto desta conta.' });
-  if (senhaInvalida(senha)) return res.status(400).json({ erro: senhaInvalida(senha) });
-  if (perfil === 'posto' && utilizador.toLowerCase() !== 'posto' + String(posto).trim().padStart(2, '0'))
-    return res.status(400).json({ erro: `O utilizador de uma conta de posto é «posto${String(posto).trim().padStart(2, '0')}».` });
-  if (armazem.existeUtilizador(utilizador)) return res.status(409).json({ erro: `Já existe uma conta «${utilizador}». Escolha outro utilizador, ou use «Nova senha» nessa conta.` });
-  armazem.criarUtilizador({ utilizador: perfil === 'posto' ? utilizador.toLowerCase() : utilizador, nome: nome.trim(), hash: await bcrypt.hash(senha, 12), perfil, posto: perfil === 'posto' ? String(posto) : null });
-  armazem.auditar('conta_criada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: utilizador, perfil, posto: perfil === 'posto' ? String(posto) : null }, ip: req.ip });
-  res.json({ ok: true });
+  if (perfil === 'posto' && !postos.validos(armazem).has(String(posto ?? ''))) return res.status(400).json({ erro: 'Escolha o posto desta conta.' });
+  if (armazem.existeUtilizador(email)) return res.status(409).json({ erro: `Já existe uma conta «${email}». As contas existentes não são alteradas; use «Novo código de acesso» nessa conta.` });
+  const a = await contas.prepararActivacao();
+  armazem.criarUtilizador({ utilizador: email, nome: nome.trim(), hash: contas.senhaInutil(), perfil, posto: perfil === 'posto' ? String(posto) : null, activacaoHash: a.hash, expira: a.expira });
+  armazem.auditar('conta_criada', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: email, perfil, posto: perfil === 'posto' ? String(posto) : null }, ip: req.ip });
+  res.json({ ok: true, utilizador: email, codigo: a.codigo, expira: a.expira });
 });
-app.post('/api/contas/:u/senha', soPortal, exige('admin'), async (req, res) => {
-  const { senha } = req.body || {};
+/* novo código de primeiro acesso (conta nova que perdeu o código, ou senha esquecida): a senha anterior deixa de servir */
+app.post('/api/contas/:u/codigo', soPortal, exige('admin'), async (req, res) => {
+  const c = armazem.porNome(req.params.u);
+  if (!c) return res.status(404).json({ erro: 'Conta não encontrada.' });
+  const a = await contas.prepararActivacao();
+  armazem.definirActivacao(c.utilizador, contas.senhaInutil(), a.hash, a.expira);
+  armazem.auditar('codigo_gerado', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: c.utilizador }, ip: req.ip });
+  res.json({ ok: true, utilizador: c.utilizador, codigo: a.codigo, expira: a.expira });
+});
+/* importação da folha «Perfis de Acesso»: cria só as contas que ainda não existem */
+app.post('/api/contas/importar', soPortal, exige('admin'), async (req, res) => {
+  const linhas = contas.lerTabela(req.body && req.body.texto);
+  if (!linhas.length || linhas.length > 1000) return res.status(400).json({ erro: 'Cole as linhas da folha (Nome, email, Tipo), até 1000.' });
+  const r = await contas.importar(armazem, linhas, { auditar: d => armazem.auditar('contas_importadas', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: d, ip: req.ip }) });
+  res.json(r);
+});
+/* primeiro acesso: email + código entregue pelo admin → a pessoa grava a sua senha */
+app.post('/api/primeiro-acesso', soPortal, limiteLogin, async (req, res) => {
+  const { utilizador, codigo, senha } = req.body || {};
+  const email = typeof utilizador === 'string' ? utilizador.trim().toLowerCase().slice(0, 120) : '';
+  const cod = contas.normalizarCodigo(codigo).slice(0, 20);
+  const u = email ? armazem.utilizador(email) : null;
+  const valido = u && u.pendente && u.activacao_hash && u.activacao_expira > Date.now();
+  const certo = await bcrypt.compare(cod || 'x', valido ? u.activacao_hash : HASH_FALSO);
+  if (!valido || !certo) {
+    falhou(falhasIp, req.ip); falhou(falhasConta, email.slice(0, 40));
+    armazem.auditar('primeiro_acesso_falhado', { utilizador: email.slice(0, 40), ip: req.ip });
+    return res.status(400).json({ erro: 'Email ou código de acesso inválido, ou código expirado. Peça um novo código ao administrador.' });
+  }
   if (senhaInvalida(senha)) return res.status(400).json({ erro: senhaInvalida(senha) });
-  if (!armazem.mudarSenha(req.params.u, await bcrypt.hash(senha, 12))) return res.status(404).json({ erro: 'Conta não encontrada.' });
-  armazem.auditar('senha_reposta', { conta: req.u.id, utilizador: req.u.utilizador, detalhe: { alvo: req.params.u }, ip: req.ip });
-  res.json({ ok: true });
+  const hash = await bcrypt.hash(senha, 12);
+  armazem.activar(u.utilizador, hash);
+  falhasConta.delete(email.slice(0, 40));
+  armazem.auditar('primeiro_acesso', { conta: u.id, utilizador: u.utilizador, ip: req.ip });
+  const dados = { id: u.id, nome: u.nome, perfil: u.perfil, posto: u.posto_id, utilizador: u.utilizador, sv: versaoSenha(hash) };
+  res.cookie(COOKIE, jwt.sign(dados, JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h' }), { httpOnly: true, sameSite: 'strict', secure: SEGURO, maxAge: 12 * 3600e3, path: '/' });
+  res.json(perfilPublico(dados));
 });
 app.post('/api/contas/:u/estado', soPortal, exige('admin'), (req, res) => {
   if (req.params.u.toLowerCase() === String(req.u.utilizador || '').toLowerCase()) return res.status(400).json({ erro: 'Não pode desactivar a sua própria conta.' });
@@ -221,6 +253,7 @@ app.post('/api/contas/:u/perfil', soPortal, exige('admin'), (req, res) => {
 /* ---------- confirmação de um posto (único caminho de escrita das confirmações) ---------- */
 const MOMENTO_OK = { 'Início de turno': ['venda', 'interrompida'], 'Reconfirmação': ['venda', 'interrompida'], 'Combustível esgotado': ['interrompida'], 'Venda retomada': ['venda'] };
 app.post('/api/confirmar', soPortal, exige('posto'), (req, res) => {
+  if (!PODE_CONFIRMAR.includes(req.u.perfil)) return res.status(403).json({ erro: 'Este perfil só consulta: não envia confirmações.' });
   const { posto, momento, responsavel, itens } = req.body || {};
   const pid = String(posto ?? '').trim();
   if (!postos.validos(armazem).has(pid)) return res.status(400).json({ erro: 'Posto desconhecido.' });

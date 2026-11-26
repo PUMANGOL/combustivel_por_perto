@@ -1,4 +1,5 @@
-/* Cria a PRIMEIRA conta de administrador (quando ainda não existe nenhum admin activo).
+/* Cria a PRIMEIRA conta de administrador (quando ainda não existe nenhum admin activo), com o email como utilizador.
+   Normalmente não é preciso: as contas da folha «Perfis de Acesso» entram com scripts/importar-perfis.js.
    As restantes contas criam-se no portal, pelo admin, no separador Gestão.
    Nunca altera uma conta existente.
    Uso: node scripts/criar-utilizador.js <utilizador> "<Nome completo>" */
@@ -9,9 +10,9 @@ const readline = require('readline');
 const armazem = require('../armazem');
 
 const [utilizador, nome] = process.argv.slice(2);
-if (utilizador && !/^[A-Za-z0-9._-]{3,40}$/.test(utilizador)) {
-  console.log(`\nO utilizador «${utilizador}» não é válido: tem de ter entre 3 e 40 caracteres (letras, números, ponto, hífen ou sublinhado), sem espaços.`);
-  console.log('Exemplos válidos: rufino, rc.pumangol, admin01. Volte a correr o ficheiro.\n');
+if (utilizador && !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(utilizador) && !/^[A-Za-z0-9._-]{3,40}$/.test(utilizador)) {
+  console.log(`\nO utilizador «${utilizador}» não é válido: use o seu email (por exemplo, nome.apelido@pumangol.co.ao).`);
+  console.log('Volte a correr o ficheiro.\n');
   process.exit(1);
 }
 if (!nome || !nome.trim()) {
@@ -19,8 +20,8 @@ if (!nome || !nome.trim()) {
   process.exit(1);
 }
 if (!utilizador) {
-  console.log('\nComo usar:  node scripts/criar-utilizador.js <utilizador> "<Nome completo>"');
-  console.log('Exemplo:    node scripts/criar-utilizador.js rufino "Rufino Chipongue"\n');
+  console.log('\nComo usar:  node scripts/criar-utilizador.js <email> "<Nome completo>"');
+  console.log('Exemplo:    node scripts/criar-utilizador.js rufino.chipongue@pumangol.co.ao "Rufino Chipongue"\n');
   console.log('Cria a primeira conta de administrador. As outras contas criam-se no portal (separador Gestão).');
   process.exit(1);
 }
@@ -54,7 +55,7 @@ function perguntarSenha(q) {
   rl.output.write('\n');
   if (repetir !== senha) { rl.close(); console.log('\nAs senhas não são iguais. Tente de novo.'); process.exit(1); }
   rl.close();
-  armazem.criarUtilizador({ utilizador, nome, hash: await bcrypt.hash(senha, 12), perfil: 'admin', posto: null });
+  armazem.criarUtilizador({ utilizador: utilizador.toLowerCase(), nome, hash: await bcrypt.hash(senha, 12), perfil: 'admin', posto: null });
   armazem.auditar('admin_criado_consola', { utilizador, detalhe: { origem: 'consola do servidor' } });
   console.log(`\n✓ Conta de administrador «${utilizador}» criada.`);
   armazem.fechar();

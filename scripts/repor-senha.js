@@ -20,7 +20,7 @@ const pergunta = q => { escondido = false; rl.output.write(q); escondido = true;
   const s1 = await pergunta('Nova senha (mínimo 10 caracteres): '); rl.output.write('\n');
   const s2 = await pergunta('Repita a senha: '); rl.output.write('\n'); rl.close();
   if (s1.length < 10 || s1 !== s2 || Buffer.byteLength(s1, 'utf8') > 72) { console.log('\nSenha curta, longa demais (máx. 72) ou diferente. Nada foi alterado.'); process.exit(1); }
-  armazem.mudarSenha(c.utilizador, await bcrypt.hash(s1, 12));
+  armazem.activar(c.utilizador, await bcrypt.hash(s1, 12));   /* também conclui um primeiro acesso pendente */
   armazem.auditar('senha_reposta_consola', { utilizador: c.utilizador, detalhe: { origem: 'consola do servidor' } });
   console.log(`\n✓ Senha da conta «${c.utilizador}» reposta. O perfil não foi alterado.`);
   armazem.fechar();

@@ -1,6 +1,6 @@
-# Combustível por Perto 5.13 — Relatório de auditoria e cibersegurança
+# Combustível por Perto 6.0 — Relatório de auditoria e cibersegurança
 
-**Data:** 20/11/2026 · **Auditoria inicial:** versão 5.6, corrigida para 5.7 · **Reauditoria:** versão **5.13** (a enviar à equipa de IT)
+**Data:** 20/11/2026 · **Auditoria inicial:** versão 5.6, corrigida para 5.7 · **Reauditorias:** versão 5.13 e versão **6.0** (a enviar à equipa de IT)
 **Âmbito:** servidor Node.js (`server.js`, `armazem.js`, `postos.js`), página web (`public/index.html`), scripts de administração, dependências e configuração.
 
 ## 1. Resumo
@@ -8,11 +8,12 @@
 | Resultado | |
 |---|---|
 | Dependências (`npm audit`) | **0 vulnerabilidades** (express 5.3, jsonwebtoken 9.0, bcryptjs 2.4, cookie-parser 1.4, dotenv 16) |
-| Teste de segurança automático | **92 de 92** verificações passaram |
+| Teste de segurança automático | **115 de 115** verificações passaram (6.0) |
 | Teste de integridade das confirmações | **62 de 62** verificações passaram |
 | Teste no navegador (XSS e CSP) | nenhum código injectado executou; nenhuma violação de CSP; mapa e QR Code funcionam com a CSP activa |
 | Constatações corrigidas na auditoria inicial | **17** (nenhuma crítica; 6 de risco médio, 11 de risco baixo) |
 | Reauditoria da 5.13 | sem constatações novas (ver secção 3-A) |
+| Reauditoria da 6.0 (contas por email, primeiro acesso, visualizador, importação) | sem constatações novas (ver secção 3-B) |
 | Vulnerabilidades abertas conhecidas | **nenhuma** |
 
 ## 2. Método
@@ -64,6 +65,26 @@ Entre a 5.7 e a 5.13, as alterações foram só na página de consulta:
 | Teste no navegador com dados maliciosos (incluindo a nova pesquisa por província do mapa) | nenhum código executou; nenhuma violação de CSP |
 
 **Manutenção:** existem versões principais mais recentes de `bcryptjs` (3.x) e de `dotenv` (18.x), sem vulnerabilidades conhecidas nas versões usadas. Actualizar numa manutenção futura, testando antes.
+
+## 3-B. Reauditoria da versão 6.0 — contas por email e primeiro acesso
+
+| Funcionalidade nova | Controlo verificado |
+|---|---|
+| Utilizador = email | Validação do formato; comparação sem distinção de maiúsculas; a mesma resposta para «email inexistente» e «senha errada» |
+| Código de primeiro acesso | ≈50 bits aleatórios (`crypto.randomBytes`); guardado só como hash bcrypt; de uso único; expira ao fim de 30 dias; bloqueio após 5 códigos errados por conta (e 20 por IP); resposta igual para email inexistente, código errado e código expirado |
+| Conta à espera do primeiro acesso | Não entra com nenhuma senha; a sua sessão não é aceite |
+| «Repor acesso» pelo admin | A senha anterior deixa de funcionar e as sessões abertas terminam; o admin nunca conhece a senha da pessoa |
+| Importação da folha «Perfis de Acesso» | Só o admin; nunca altera contas existentes; valida email, tipo, nome e posto; até 1000 linhas por pedido |
+| Ficheiro de códigos (`copias/codigos-acesso-*.csv`) | Criado só com leitura do dono (permissões 600); deve ser apagado depois de entregues os códigos |
+| Perfil Visualizador | Lê como o gestor; o servidor recusa as confirmações (403), mesmo por pedidos directos |
+| Auditoria | Novos eventos: contas importadas, código gerado, primeiro acesso e primeiro acesso falhado; os códigos nunca são registados |
+
+Resultados: **115 de 115** no teste de segurança, **62 de 62** no teste de integridade, **0** vulnerabilidades nas dependências, nenhum código injectado executou no navegador.
+
+**Recomendações adicionais:**
+- entregar cada código só à pessoa respectiva (pessoalmente ou por canal interno seguro) e apagar o ficheiro dos códigos depois;
+- o ficheiro `perfis-acesso.csv` contém nomes e emails de colaboradores: tratá-lo como dados pessoais e não o publicar;
+- numa fase seguinte, considerar o envio automático dos códigos por email institucional e a autenticação de dois factores para administradores.
 
 ## 4. Controlos verificados
 

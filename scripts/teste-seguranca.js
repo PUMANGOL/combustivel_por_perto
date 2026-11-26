@@ -23,7 +23,8 @@ function contas(env) {
     a.criarUtilizador({utilizador:'admin1',nome:'Admin',hash:h,perfil:'admin'});
     a.criarUtilizador({utilizador:'gestor1',nome:'Gestor',hash:h,perfil:'gestor'});
     a.criarUtilizador({utilizador:'posto09',nome:'TALATONA',hash:h,perfil:'posto',posto:'9'});
-    a.criarUtilizador({utilizador:'alvo1',nome:'Alvo',hash:h,perfil:'gestor'}); a.fechar();`], { cwd: RAIZ, env, stdio: 'pipe' });
+    a.criarUtilizador({utilizador:'alvo1',nome:'Alvo',hash:h,perfil:'gestor'});
+    a.criarUtilizador({utilizador:'ver@pumangol.co.ao',nome:'Visualizador',hash:h,perfil:'visualizador'}); a.fechar();`], { cwd: RAIZ, env, stdio: 'pipe' });
 }
 function ligar(env) {
   return new Promise((ok_, falha) => {
@@ -94,8 +95,11 @@ const parar = p => new Promise(r => { p.once('exit', r); p.kill(); });
   const expirado = jwt.sign({ ...dec.payload, iat: Math.floor(Date.now() / 1000) - 50000, exp: Math.floor(Date.now() / 1000) - 10 }, SEGREDO, { algorithm: 'HS256' });
   ok('Sessão expirada é recusada', await nivel(`${nome}=${expirado}`) === 'cliente');
   const Alvo = await entrar('alvo1');
-  await pedido('POST', '/api/contas/alvo1/senha', { senha: 'NovaSenhaAlvo2026' }, A);
-  ok('Senha reposta pelo admin: as sessões abertas dessa conta terminam', await nivel(Alvo) === 'cliente');
+  const cod = (await pedido('POST', '/api/contas/alvo1/codigo', {}, A)).j;
+  ok('Acesso reposto pelo admin (novo código): as sessões abertas dessa conta terminam', await nivel(Alvo) === 'cliente');
+  ok('… e a senha antiga deixa de funcionar', (await pedido('POST', '/api/entrar', { utilizador: 'alvo1', senha: 'SenhaTeste2026' })).status === 401);
+  const pa = await pedido('POST', '/api/primeiro-acesso', { utilizador: 'alvo1', codigo: cod.codigo, senha: 'NovaSenhaAlvo2026' });
+  ok('Com o código, a pessoa grava a sua nova senha e entra', pa.status === 200 && await nivel(pa.cookie) === 'gestor');
   const Alvo2 = await entrar('alvo1', 'NovaSenhaAlvo2026');
   await pedido('POST', '/api/contas/alvo1/estado', { activo: false }, A);
   ok('Conta desactivada: a sessão aberta termina de imediato', await nivel(Alvo2) === 'cliente');
@@ -134,7 +138,7 @@ const parar = p => new Promise(r => { p.once('exit', r); p.kill(); });
   ok('Identificador com SQL é recusado', (await pedido('PUT', `/api/c/postos/${encodeURIComponent("9' OR '1'='1")}`, { id: 'x' }, A)).status === 400);
   ok('Parâmetro do histórico com SQL é recusado', (await pedido('GET', `/api/historico?posto=${encodeURIComponent("9' OR '1'='1")}&prod=GA`, undefined, A)).status === 400);
   ok('Posto com SQL na confirmação é recusado', (await pedido('POST', '/api/confirmar', { posto: '9; DROP TABLE confirmacoes', momento: 'Reconfirmação', responsavel: 'X', itens: [{ prod: 'GA', estado: 'venda' }] }, A)).status === 400);
-  ok('Nome com código HTML é recusado na criação de conta', (await pedido('POST', '/api/contas', { utilizador: 'xss1', nome: '<img src=x onerror=alert(1)>', perfil: 'gestor', senha: 'SenhaXss202620' }, A)).status === 400);
+  ok('Nome com código HTML é recusado na criação de conta', (await pedido('POST', '/api/contas', { utilizador: 'xss1@pumangol.co.ao', nome: '<img src=x onerror=alert(1)>', perfil: 'gestor' }, A)).status === 400);
   ok('Responsável com código HTML é recusado na confirmação', (await pedido('POST', '/api/confirmar', { posto: 9, momento: 'Reconfirmação', responsavel: '<script>alert(1)</script>', itens: [{ prod: 'GA', estado: 'venda' }] }, P)).status === 400);
   ok('Posto com código HTML no nome é recusado (mesmo vindo do admin)', (await pedido('PUT', '/api/c/postos/9', { id: 9, nome: 'TALATONA <img src=x onerror=alert(1)>', municipio: 'Samba', provincia: 'Luanda', lat: -8.9, lng: 13.19 }, A)).status === 400);
   ok('Posto com campos desconhecidos ou coordenadas fora de Angola é recusado', (await pedido('PUT', '/api/c/postos/9', { id: 9, nome: 'X', lat: 40, lng: 13 }, A)).status === 400 && (await pedido('PUT', '/api/c/postos/9', { id: 9, nome: 'X', script: 'y' }, A)).status === 400);
@@ -144,14 +148,16 @@ const parar = p => new Promise(r => { p.once('exit', r); p.kill(); });
   const mal = await pedido('POST', '/api/confirmar', undefined, P, { 'X-VIA': '1' }, '{"posto": 9,');
   ok('JSON mal formado: 400 sem pormenores internos', mal.status === 400 && !/at |node_modules|SyntaxError/.test(mal.txt));
   ok('Rota inexistente da API: 404 em JSON, sem pormenores', (await pedido('GET', '/api/nao-existe')).status === 404);
-  ok('Senha com mais de 72 caracteres é recusada (limite do bcrypt)', (await pedido('POST', '/api/contas', { utilizador: 'longo1', nome: 'Longo', perfil: 'gestor', senha: 'x'.repeat(80) }, A)).status === 400);
-  ok('Senha com menos de 10 caracteres é recusada', (await pedido('POST', '/api/contas', { utilizador: 'curto1', nome: 'Curto', perfil: 'gestor', senha: 'curta' }, A)).status === 400);
+  ok('Senha com mais de 72 caracteres é recusada (limite do bcrypt)', (await pedido('POST', '/api/senha', { actual: 'SenhaGestorNova26', nova: 'x'.repeat(80) }, Gn)).status === 400);
+  ok('Senha com menos de 10 caracteres é recusada', (await pedido('POST', '/api/senha', { actual: 'SenhaGestorNova26', nova: 'curta' }, Gn)).status === 400);
+  ok('Conta criada pelo admin só aceita email como utilizador', (await pedido('POST', '/api/contas', { utilizador: 'semarroba', nome: 'X', perfil: 'gestor' }, A)).status === 400);
   ok('O último admin não pode ser desactivado', (await pedido('POST', '/api/contas/admin1/estado', { activo: false }, A)).status === 400);
 
   /* 7. tempo real */
   titulo('Ligações de tempo real');
   const ctls = [], sts = [];
-  for (let i = 0; i < 51; i++) { const c = new AbortController(); ctls.push(c); sts.push(await fetch(BASE + '/api/eventos', { signal: c.signal, headers: { 'X-Forwarded-For': '10.9.9.9' } }).then(r => r.status).catch(() => 0)); }
+  const abertas = [];   /* manter as respostas referenciadas, para as ligações não serem fechadas pelo recolector de lixo */
+  for (let i = 0; i < 51; i++) { const c = new AbortController(); ctls.push(c); sts.push(await fetch(BASE + '/api/eventos', { signal: c.signal, headers: { 'X-Forwarded-For': '10.9.9.9' } }).then(r => { abertas.push(r); return r.status; }).catch(() => 0)); }
   const outro = await fetch(BASE + '/api/eventos', { headers: { 'X-Forwarded-For': '10.9.9.10' } }).then(r => { r.body.cancel(); return r.status; });
   ctls.forEach(c => c.abort());
   ok('No máximo 50 ligações de tempo real por visitante', sts.slice(0, 50).every(s => s === 200) && sts[50] === 429, sts.filter(s => s !== 200).length);
@@ -166,14 +172,49 @@ const parar = p => new Promise(r => { p.once('exit', r); p.kill(); });
   ok('Senhas guardadas com bcrypt (nunca em texto)', db.h.every(h => /^\$2[aby]\$\d\d\$/.test(h)));
   ok('Base de dados íntegra depois dos ataques (integrity_check)', Object.values(db.ic)[0] === 'ok');
 
+  /* 8-A. primeiro acesso, visualizador e importação */
+  titulo('Contas por email, primeiro acesso e importação');
+  const imp = (await pedido('POST', '/api/contas/importar', { texto: 'Nome;email;Tipo\nTALATONA;pa.talatona@pumangol.co.ao;Posto\nHelder Teste;helder.teste@pumangol.co.ao;Gestor\nVer Teste;ver.teste@pumangol.co.ao;Visualizador\nPosto Fantasma;pa.fantasma@pumangol.co.ao;Posto\nSem email;semarroba;Gestor\nTALATONA;pa.talatona@pumangol.co.ao;Posto' }, A)).j || [];
+  const est = e => imp.filter(x => x.estado === e).length;
+  ok('Importação: cria as contas válidas, com código de primeiro acesso', est('criada') === 3 && imp.filter(x => x.estado === 'criada').every(x => /^[A-Z2-9]{5}-[A-Z2-9]{5}$/.test(x.codigo)), JSON.stringify(imp.map(x => x.estado)));
+  ok('Importação: posto reconhecido pelo nome (TALATONA → código 9)', imp.find(x => x.email === 'pa.talatona@pumangol.co.ao' && x.estado === 'criada')?.posto === '9');
+  ok('Importação: posto inexistente, email inválido e linha repetida dão erro', est('erro') === 3);
+  const imp2 = (await pedido('POST', '/api/contas/importar', { texto: 'Nome;email;Tipo\nOutro Nome;pa.talatona@pumangol.co.ao;Gestor' }, A)).j;
+  ok('Importação: uma conta que já existe não é alterada', imp2[0].estado === 'existente' && (await pedido('GET', '/api/contas', undefined, A)).j.find(c => c.utilizador === 'pa.talatona@pumangol.co.ao').perfil === 'posto');
+  ok('Importação: só o admin pode importar', (await pedido('POST', '/api/contas/importar', { texto: 'Nome;email;Tipo\nX;x@pumangol.co.ao;Admin' }, Gn)).status === 403);
+  const codT = imp.find(x => x.email === 'pa.talatona@pumangol.co.ao').codigo;
+  ok('Conta à espera do primeiro acesso não entra com nenhuma senha', (await pedido('POST', '/api/entrar', { utilizador: 'pa.talatona@pumangol.co.ao', senha: 'QualquerSenha2026' })).status === 401);
+  const e1 = await pedido('POST', '/api/primeiro-acesso', { utilizador: 'pa.talatona@pumangol.co.ao', codigo: 'AAAAA-BBBBB', senha: 'SenhaPostoNova26' });
+  const e2 = await pedido('POST', '/api/primeiro-acesso', { utilizador: 'nao.existe@pumangol.co.ao', codigo: codT, senha: 'SenhaPostoNova26' });
+  ok('Código errado e email inexistente dão a mesma resposta (sem revelar contas)', e1.status === 400 && e2.status === 400 && e1.txt === e2.txt);
+  ok('Primeiro acesso com senha fraca é recusado', (await pedido('POST', '/api/primeiro-acesso', { utilizador: 'pa.talatona@pumangol.co.ao', codigo: codT, senha: 'curta' })).status === 400);
+  const ok1 = await pedido('POST', '/api/primeiro-acesso', { utilizador: 'PA.Talatona@pumangol.co.ao', codigo: codT.toLowerCase().replace('-', ' '), senha: 'SenhaPostoNova26' });
+  ok('Primeiro acesso com o código certo grava a senha e abre sessão de posto', ok1.status === 200 && await nivel(ok1.cookie) === 'posto');
+  ok('O código só serve uma vez', (await pedido('POST', '/api/primeiro-acesso', { utilizador: 'pa.talatona@pumangol.co.ao', codigo: codT, senha: 'OutraSenha2026x' })).status === 400);
+  ok('Depois do primeiro acesso, entra com email e a senha gravada', !!(await entrar('pa.talatona@pumangol.co.ao', 'SenhaPostoNova26')));
+  const codG = imp.find(x => x.email === 'helder.teste@pumangol.co.ao').codigo;
+  execFileSync(process.execPath, ['-e', `const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(${JSON.stringify(E.DADOS_FICHEIRO)}); d.prepare("UPDATE utilizadores SET activacao_expira=1 WHERE utilizador='helder.teste@pumangol.co.ao'").run();`], { stdio: 'ignore' });
+  ok('Código expirado é recusado', (await pedido('POST', '/api/primeiro-acesso', { utilizador: 'helder.teste@pumangol.co.ao', codigo: codG, senha: 'SenhaGestorNova26' })).status === 400);
+  const codV = imp.find(x => x.email === 'ver.teste@pumangol.co.ao').codigo;
+  const crua = execFileSync(process.execPath, ['-e', `const {DatabaseSync}=require('node:sqlite'); const d=new DatabaseSync(${JSON.stringify(E.DADOS_FICHEIRO)}); console.log(JSON.stringify(d.prepare('SELECT * FROM utilizadores').all())+JSON.stringify(d.prepare('SELECT * FROM auditoria').all()));`], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+  ok('Os códigos de acesso não ficam guardados em claro (nem na auditoria)', ![codT, codG, codV].some(c => crua.includes(c) || crua.includes(c.replace('-', ''))));
+  for (let i = 0; i < 5; i++) await pedido('POST', '/api/primeiro-acesso', { utilizador: 'ver.teste@pumangol.co.ao', codigo: 'ZZZZZ-ZZZZ' + i, senha: 'SenhaVerNova2026' });
+  ok('Depois de 5 códigos errados, a conta fica bloqueada 15 min (mesmo com o código certo)', (await pedido('POST', '/api/primeiro-acesso', { utilizador: 'ver.teste@pumangol.co.ao', codigo: codV, senha: 'SenhaVerNova2026' })).status === 429);
+  const V = await entrar('ver@pumangol.co.ao');
+  ok('Visualizador entra e é reconhecido como visualizador', await nivel(V) === 'visualizador');
+  ok('Visualizador não envia confirmações', (await pedido('POST', '/api/confirmar', { posto: 9, momento: 'Reconfirmação', responsavel: 'X', itens: [{ prod: 'GA', estado: 'venda' }] }, V)).status === 403);
+  const hv = await pedido('GET', '/api/historico?posto=9&prod=GA', undefined, V);
+  ok('Visualizador vê o histórico de qualquer posto', hv.status === 200, hv.status + ' ' + hv.txt.slice(0, 80));
+  ok('Visualizador não vê as contas nem a auditoria', (await pedido('GET', '/api/contas', undefined, V)).status === 403 && (await pedido('GET', '/api/auditoria', undefined, V)).status === 403);
+
   /* 9. auditoria (lida pela própria API, como o admin a vê) */
   titulo('Registo de auditoria');
   await pedido('POST', '/api/entrar', { utilizador: 'gestor1', senha: 'senha-errada-de-teste' });
   const aud = (await pedido('GET', '/api/auditoria?limite=500', undefined, A)).j || [];
   const acc = new Set(aud.map(x => x.accao));
-  for (const a of ['entrada', 'entrada_falhada', 'saida', 'senha_reposta', 'conta_desactivada', 'senha_propria_alterada'])
+  for (const a of ['entrada', 'entrada_falhada', 'saida', 'codigo_gerado', 'primeiro_acesso', 'conta_desactivada', 'senha_propria_alterada', 'contas_importadas'])
     ok(`Fica registado: ${a}`, acc.has(a));
-  ok('O registo de auditoria não contém senhas', aud.length > 0 && !JSON.stringify(aud).match(/SenhaTeste2026|NovaSenhaAlvo2026|SenhaGestorNova26|senha-errada-de-teste/));
+  ok('O registo de auditoria não contém senhas', aud.length > 0 && !JSON.stringify(aud).match(/SenhaTeste2026|NovaSenhaAlvo2026|SenhaGestorNova26|SenhaPostoNova26|senha-errada-de-teste/));
   ok('O registo de auditoria indica o endereço IP de cada acção', aud.every(x => x.ip));
 
   /* 10. força bruta (no fim: bloqueia o endereço IP do teste) */

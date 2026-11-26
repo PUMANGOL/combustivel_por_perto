@@ -154,6 +154,9 @@ details[open] > summary{margin-bottom:10px}
 .placa b{font-size:18px;color:var(--brand)}
 .placa span{font-size:13px}
 body[data-perfil="cliente"] main{padding-bottom:24px}
+.btn-link{background:none;border:0;padding:8px 0 0;color:var(--brand-2);font:inherit;font-size:14px;font-weight:700;text-decoration:underline;cursor:pointer}
+.codigo-box{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:2px solid var(--brand);border-radius:var(--r);background:var(--tint)}
+.codigo-box code{font-size:22px;font-weight:800;letter-spacing:.08em}
 .dicas{display:flex;flex-direction:column;gap:8px}
 .dica{display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:64px;padding:12px 14px;background:var(--tint);border:1px solid var(--brand);border-radius:var(--r);font-size:14.5px;line-height:1.45;color:var(--ink)}
 .dica-ic{flex:0 0 40px;width:40px;display:flex;align-items:center;justify-content:center}
@@ -224,7 +227,7 @@ dialog.entrar .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:8px
 
 <header class="top"><div class="wrap">
   <svg class="logo" viewBox="0 0 154.48 56.42" role="img" aria-label="VIA"><path fill="currentColor" d="m105.65,56.42c-8.26,0-15.29-3.11-19.82-8.76-1.36-1.7-2.44-3.57-3.23-5.59v13.89h-12.68V5.32c-7.82,16.48-14.24,29.91-15.51,32.54-5.85,12.14-14.47,18.56-24.9,18.56-2.79,0-6.86-.56-10.4-3.24-4.36-3.3-6.58-8.84-6.6-16.47,0-.1,0-21.39,0-23.74H0V.46h25.28v34.93c0,5.98,1.76,8.53,5.89,8.53,3.16,0,7.71-1.630,11.43-9.39.21-.43,16-33.61,16.16-33.94l.06-.12h23.78v24.34C87.6,9.91,102.77,0,120.83,0c12.64,0,21.14,7.32,21.14,18.21v25.23h12.51v12.51h-23.99v-9.01c-7.11,5.94-16.36,9.47-24.84,9.47Zm12.76-44.74c-6.23,0-11.91,1.87-16.42,5.42-4.04,3.18-6.83,7.46-7.86,12.04-.9,4.02-.13,7.81,2.16,10.68,2.43,3.03,6.280,4.7,10.85,4.7,9.3,0,22.75-8.21,22.75-23.07,0-8.51-7.2-9.78-11.49-9.78Z"/></svg>
-  <div class="mark"><b>Combustível por Perto</b><span>Rede Pumangol · v5.13</span></div>
+  <div class="mark"><b>Combustível por Perto</b><span>Rede Pumangol · v6.0</span></div>
   <div class="clock" aria-label="Hora de Luanda"><b id="relogio">--:--</b>Hora de Luanda</div>
   <div class="acesso" id="acesso"><button class="btn sm" type="button" id="btn-entrar">Entrar</button></div>
 </div></header>
@@ -232,11 +235,22 @@ dialog.entrar .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:8px
 <dialog class="entrar" id="dlg-entrar" aria-labelledby="dlg-t">
   <form id="f-entrar" method="dialog" novalidate>
     <h2 id="dlg-t">Entrar</h2>
-    <p>Acesso para os postos, gestores e administradores. A consulta é pública e não precisa de conta.</p>
-    <label for="e-u">Utilizador</label><input id="e-u" name="utilizador" autocomplete="username" required>
+    <p>Acesso para postos, gestores, visualizadores e administradores. A consulta é pública e não precisa de conta.</p>
+    <label for="e-u">Email</label><input id="e-u" name="utilizador" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required>
     <label for="e-s">Senha</label><input id="e-s" name="senha" type="password" autocomplete="current-password" required>
     <div class="erro" id="e-erro" role="alert"></div>
     <div class="acts"><button class="btn" type="button" id="e-cancelar">Cancelar</button><button class="btn primary" type="submit">Entrar</button></div>
+    <button class="btn-link" type="button" id="e-primeiro">Primeiro acesso? Tenho um código de acesso</button>
+  </form>
+  <form id="f-primeiro" method="dialog" novalidate hidden>
+    <h2>Primeiro acesso</h2>
+    <p>Indique o seu email, o código de acesso que recebeu do administrador e a senha que quer usar.</p>
+    <label for="p-u">Email</label><input id="p-u" name="utilizador" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required>
+    <label for="p-c">Código de acesso</label><input id="p-c" name="codigo" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCDE-FGHJK" required>
+    <label for="p-s">Nova senha (10 a 72 caracteres)</label><input id="p-s" name="senha" type="password" autocomplete="new-password" minlength="10" required>
+    <label for="p-s2">Repita a senha</label><input id="p-s2" name="senha2" type="password" autocomplete="new-password" minlength="10" required>
+    <div class="erro" id="p-erro" role="alert"></div>
+    <div class="acts"><button class="btn" type="button" id="p-voltar">Voltar</button><button class="btn primary" type="submit">Gravar senha e entrar</button></div>
   </form>
 </dialog>
 <main class="wrap" id="app" aria-live="polite"><p class="empty">A carregar…</p></main>
@@ -596,13 +610,13 @@ async function ligarDB(){
    admin    = acesso total, incluindo Gestão (contas e lista de postos)
    As permissões no servidor (server.js) são a protecção real; o ecrã só esconde o que o perfil não pode usar. */
 const PERFIL = {nivel:'cliente', conta:null, nome:'', lido:false};
-const ABAS = {cliente:['consulta'], posto:['consulta','posto','regional','historico'], gestor:['consulta','posto','regional','historico'], admin:['consulta','posto','regional','historico','piloto']};
+const ABAS = {cliente:['consulta'], posto:['consulta','posto','regional','historico'], gestor:['consulta','posto','regional','historico'], visualizador:['consulta','posto','regional','historico'], admin:['consulta','posto','regional','historico','piloto']};
 async function lerPerfil(){
   try{
     if(location.protocol==='file:'){ PERFIL.nivel = new URLSearchParams(location.search).get('perfil') || 'admin'; }
     else {
       const u = await api('GET','/api/sessao');
-      PERFIL.nivel = ['posto','gestor','admin'].includes(u.nivel) ? u.nivel : 'cliente';
+      PERFIL.nivel = ['posto','gestor','visualizador','admin'].includes(u.nivel) ? u.nivel : 'cliente';
       PERFIL.conta = u.conta || null; PERFIL.nome = u.nome || ''; PERFIL.utilizador = u.utilizador || ''; PERFIL.posto = u.posto!=null ? String(u.posto) : null;
     }
   }catch(e){ PERFIL.nivel='cliente'; }
@@ -618,16 +632,29 @@ function mostrarAcesso(){
 }
 document.addEventListener('click', async e => {
   const dlg = $('#dlg-entrar');
-  if(e.target.closest('#btn-entrar')){ $('#e-erro').textContent=''; dlg.showModal(); $('#e-u').focus(); }
+  if(e.target.closest('#btn-entrar')){ $('#e-erro').textContent=''; $('#f-primeiro').hidden=true; $('#f-entrar').hidden=false; dlg.showModal(); $('#e-u').focus(); }
   else if(e.target.closest('#e-cancelar')) dlg.close();
   else if(e.target.closest('#btn-sair')){ try{ await api('POST','/api/sair',{}); }catch(_){} location.reload(); }
+});
+const irDepoisDeEntrar = u => { if(u && u.nivel==='posto') location.hash='#posto'; location.reload(); };
+$('#e-primeiro').addEventListener('click', ()=>{ $('#f-entrar').hidden=true; $('#f-primeiro').hidden=false; $('#p-erro').textContent=''; $('#p-u').value=$('#e-u').value; $('#p-u').focus(); });
+$('#p-voltar').addEventListener('click', ()=>{ $('#f-primeiro').hidden=true; $('#f-entrar').hidden=false; });
+$('#f-primeiro').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, err = $('#p-erro'), btn = f.querySelector('button[type=submit]');
+  if(!f.utilizador.value.trim() || !f.codigo.value.trim()){ err.textContent='Indique o email e o código de acesso.'; return; }
+  if(f.senha.value.length<10){ err.textContent='A senha tem de ter pelo menos 10 caracteres.'; return; }
+  if(f.senha.value!==f.senha2.value){ err.textContent='As duas senhas não são iguais.'; return; }
+  btn.disabled = true; err.textContent = '';
+  try{ irDepoisDeEntrar(await api('POST','/api/primeiro-acesso',{utilizador:f.utilizador.value.trim(), codigo:f.codigo.value, senha:f.senha.value})); }
+  catch(x){ err.textContent = x.message; btn.disabled = false; }
 });
 $('#f-entrar').addEventListener('submit', async e => {
   e.preventDefault();
   const f = e.target, err = $('#e-erro'), btn = f.querySelector('button[type=submit]');
-  if(!f.utilizador.value.trim() || !f.senha.value){ err.textContent='Indique o utilizador e a senha.'; return; }
+  if(!f.utilizador.value.trim() || !f.senha.value){ err.textContent='Indique o email e a senha.'; return; }
   btn.disabled = true; err.textContent = '';
-  try{ const u = await api('POST','/api/entrar',{utilizador:f.utilizador.value.trim(), senha:f.senha.value}); if(u && u.nivel==='posto') location.hash='#posto'; location.reload(); }
+  try{ irDepoisDeEntrar(await api('POST','/api/entrar',{utilizador:f.utilizador.value.trim(), senha:f.senha.value})); }
   catch(x){ err.textContent = x.message; btn.disabled = false; }
 });
 function aplicarPerfil(){
@@ -832,7 +859,7 @@ function vConsultaCorpo(){
       <span class="small muted">Sem província, a pesquisa usa a localização do seu telemóvel (GPS).</span>
     </form>
     ${C.aviso?`<div class="info">${esc(C.aviso)}</div>`:''}`;
-  const rodape = `<p class="small muted">O estado de cada posto é a última confirmação enviada pelo próprio posto, renovada automaticamente a cada 3 horas enquanto o posto não enviar outra. «Por confirmar» quer dizer que o posto ainda não confirmou.</p>`;
+  const rodape = '';   /* a explicação do funcionamento não é mostrada ao cliente */
   const cab = `
   <p class="lead"><b>Saiba onde abastecer, antes de sair.</b><span>Consulte a disponibilidade de gasolina e gasóleo nos postos Pumangol e siga viagem com mais tranquilidade.</span></p>
   ${blocoDicas()}
@@ -965,7 +992,9 @@ function vPosto(id){
     <div class="meta">${last?`Última confirmação: <b>${quando(last.hora)}</b> (${decorrido(last.hora)}) por ${esc(last.utilizador)}`:'Este posto ainda não enviou nenhuma confirmação.'}</div>
     <div class="meta">Indique o estado de cada combustível e o momento. O cliente vê «Disponível» ou, se o combustível estiver indisponível ou por confirmar, «Disponibilidade por confirmar». A última confirmação mantém-se e é renovada automaticamente a cada 3 horas até nova confirmação. «Combustível esgotado» só se usa com Indisponível; «Venda retomada» só com Disponível.</div>
   </section>
+  ${PERFIL.nivel==='visualizador'?'<div class="info">Perfil de <b>visualização</b>: pode consultar o estado e o histórico, mas não envia confirmações.</div>':''}
   <form class="list" data-form="confirmar">
+    <fieldset class="list" ${PERFIL.nivel==='visualizador'?'disabled':''} style="border:0;margin:0;padding:0;min-width:0">
     ${linhas}
     <div class="fuelrow"><h3>Momento</h3>
       <div class="chips" role="radiogroup" aria-label="Momento">${MOMENTOS.map((m,i)=>`<label><input type="radio" name="momento" value="${m}" ${i===0?'checked':''}><span>${m}</span></label>`).join('')}</div>
@@ -975,7 +1004,8 @@ function vPosto(id){
         : `<input class="input" id="resp" name="resp" required placeholder="Nome do responsável" value="${esc(P.nome)}" autocomplete="name">`}
       <span class="small muted">O posto, o utilizador e a hora de Luanda ficam registados automaticamente.</span>
     </div>
-    <button class="btn primary block" type="submit">Enviar confirmação</button>
+    ${PERFIL.nivel==='visualizador'?'':'<button class="btn primary block" type="submit">Enviar confirmação</button>'}
+    </fieldset>
   </form>
   <section>${blocoAtendimento(p)}</section>
   ${PERFIL.nivel==='posto'?blocoMinhaSenha():''}
@@ -1011,6 +1041,7 @@ function vRegional(){
     <span class="small muted">Por defeito, toda a rede começa com gasolina e gasóleo «Disponível». Cada estado é a última confirmação e mantém-se até à seguinte.</span>
   </section>
   ${PERFIL.nivel==='admin'?blocoRede():''}
+  ${PERFIL.nivel!=='admin'?blocoMinhaSenha():''}
   <section><h3 class="eyebrow">Indisponíveis agora</h3>
     ${indisp.length?`<div class="list compact">${indisp.map(cartao).join('')}</div>`:'<p class="empty">Nenhum posto indicou falta de produto.</p>'}
   </section>
@@ -1110,12 +1141,13 @@ function lerPostosCSV(txt){
   if(!out.length) throw new Error('Nenhum posto válido.'); return out;
 }
 const PIL = {imp:'', prev:null, msg:'', postosTxt:''};
-const G = {contas:null, erro:'', repor:null, perfil:null, aud:null};
+const G = {contas:null, erro:'', repor:null, perfil:null, aud:null, codigo:null, imp:null};
 const AUD_TXT = {entrada:'Entrada no portal', entrada_falhada:'Entrada falhada', entrada_bloqueada:'Entrada bloqueada (demasiadas tentativas)', saida:'Saída',
   conta_criada:'Conta criada', senha_reposta:'Senha reposta pelo admin', conta_desactivada:'Conta desactivada', conta_reactivada:'Conta reactivada',
   perfil_alterado:'Perfil alterado', senha_propria_alterada:'Mudou a própria senha', senha_propria_falhada:'Senha actual errada ao mudar a senha',
   rede_confirmada:'Rede toda confirmada', dados_alterados:'Dados alterados', dados_apagados:'Dados apagados',
-  admin_criado_consola:'Admin criado na consola do servidor', senha_reposta_consola:'Senha reposta na consola do servidor'};
+  admin_criado_consola:'Admin criado na consola do servidor', senha_reposta_consola:'Senha reposta na consola do servidor',
+  codigo_gerado:'Novo código de acesso gerado', contas_importadas:'Contas importadas', primeiro_acesso:'Primeiro acesso (senha gravada)', primeiro_acesso_falhado:'Primeiro acesso falhado'};
 async function carregarAuditoria(){ try{ G.aud = await api('GET','/api/auditoria?limite=200'); }catch(e){ G.aud = []; toast(e.message); } route(); }
 function detalheAud(d){ if(!d) return '';
   try{ const o=JSON.parse(d);
@@ -1147,30 +1179,39 @@ function vPiloto(){
   const comConta = new Set(contas.filter(c=>c.activo && c.perfil==='posto').map(c=>String(c.posto_id)));
   const semConta = S.postos.filter(p=>!comConta.has(String(p.id)));
   return `<section><span class="eyebrow">Gestão</span><h2>Contas, postos e canais</h2>
-    <div class="info">Perfis: <b>Posto</b> confirma e vê só o seu posto; <b>Gestor</b> vê toda a rede; <b>Admin</b> tem acesso total e é o único que cria contas e altera perfis. As contas criadas mantêm-se nas actualizações do portal.</div>
+    <div class="info">Perfis: <b>Posto</b> confirma o seu posto; <b>Gestor</b> vê e confirma toda a rede; <b>Visualizador</b> só consulta (Consulta, Posto, Estado da Rede e Histórico, sem enviar confirmações); <b>Admin</b> tem acesso total. O utilizador é o <b>email</b>. Cada pessoa grava a sua senha no primeiro acesso, com o código que o admin lhe entrega. As contas mantêm-se nas actualizações do portal.</div>
   </section>
   <section><h3 class="eyebrow">Criar conta</h3>
     <form class="list" data-form="conta" autocomplete="off">
       <label class="small" for="ct-perfil">Perfil</label>
-      <select class="input" id="ct-perfil" name="perfil"><option value="posto">Posto: confirma o seu posto</option><option value="gestor">Gestor: vê toda a rede</option><option value="admin">Admin: acesso total</option></select>
+      <select class="input" id="ct-perfil" name="perfil"><option value="posto">Posto: confirma o seu posto</option><option value="gestor">Gestor: vê e confirma toda a rede</option><option value="visualizador">Visualizador: só consulta</option><option value="admin">Admin: acesso total</option></select>
       <label class="small" for="ct-posto">Posto (só para contas de posto)</label>
       <select class="input" id="ct-posto" name="posto"><option value="">Escolha o posto</option>${S.postos.map(p=>`<option value="${p.id}">${esc(p.nome)} · ${esc(p.municipio)}${comConta.has(String(p.id))?' (já tem conta)':''}</option>`).join('')}</select>
-      <label class="small" for="ct-u">Utilizador (para entrar)</label><input class="input" id="ct-u" name="utilizador" placeholder="Preenchido ao escolher o posto" autocapitalize="none" spellcheck="false" readonly required>
-      <label class="small" for="ct-n">Nome a mostrar</label><input class="input" id="ct-n" name="nome" placeholder="Preenchido ao escolher o posto" readonly required>
-      <label class="small" for="ct-s">Senha inicial (mínimo 10 caracteres)</label><input class="input" id="ct-s" name="senha" type="text" minlength="10" autocomplete="new-password" required>
-      <span class="small muted">Entregue o utilizador e a senha ao responsável do posto em mão ou por telefone, nunca por mensagem escrita.</span>
-      <button class="btn primary" type="submit">Criar conta</button>
+      <label class="small" for="ct-u">Email (é o utilizador para entrar)</label><input class="input" id="ct-u" name="utilizador" type="email" placeholder="nome.apelido@pumangol.co.ao" autocapitalize="none" spellcheck="false" required>
+      <label class="small" for="ct-n">Nome a mostrar</label><input class="input" id="ct-n" name="nome" placeholder="Preenchido ao escolher o posto" required>
+      <span class="small muted">Não se define senha: o portal gera um <b>código de primeiro acesso</b> (válido 30 dias), que entrega à pessoa em privado. No primeiro acesso, ela grava a sua própria senha.</span>
+      <button class="btn primary" type="submit">Criar conta e gerar código</button>
     </form>
+    ${G.codigo?`<div class="codigo-box" role="status"><span>Código de primeiro acesso de <b>${esc(G.codigo.utilizador)}</b>:</span><code>${esc(G.codigo.codigo)}</code>
+      <span class="small">Válido até ${esc(fD.format(G.codigo.expira))}. Entregue-o só a esta pessoa (pessoalmente ou por canal seguro). Não volta a ser mostrado.</span>
+      <div class="row"><button class="btn sm" type="button" data-act="copiarcodigo">Copiar código</button><button class="btn sm" type="button" data-act="fecharcodigo">Já entreguei: fechar</button></div></div>`:''}
   </section>
+  <section><details ${G.imp?'open':''}><summary>Importar contas da folha «Perfis de Acesso»</summary>
+    <div class="list"><span class="small muted">No Excel, seleccione as colunas <b>Nome</b>, <b>email</b> e <b>Tipo</b> (com o cabeçalho), copie e cole aqui. Tipos: Admin, Gestor, Visualizador ou Posto (o posto é reconhecido pelo nome). Só são criadas as contas que ainda não existem; as existentes não são alteradas.</span>
+      <textarea class="input" id="imp-txt" rows="6" aria-label="Linhas da folha Perfis de Acesso"></textarea>
+      <button class="btn primary" type="button" data-act="importarcontas">Importar e gerar códigos</button>
+      ${G.imp?`<div class="info"><b>${G.imp.filter(x=>x.estado==='criada').length}</b> criadas · <b>${G.imp.filter(x=>x.estado==='existente').length}</b> já existiam · <b>${G.imp.filter(x=>x.estado==='erro').length}</b> com erro</div>
+        ${G.imp.some(x=>x.estado==='criada')?'<button class="btn" type="button" data-act="baixarcodigos">Descarregar códigos (CSV)</button><span class="small muted">Os códigos só ficam disponíveis agora. Entregue cada um à pessoa respectiva e apague o ficheiro depois.</span>':''}
+        <div class="tbl"><table><thead><tr><th>Email</th><th>Perfil</th><th>Resultado</th></tr></thead><tbody>${G.imp.map(x=>`<tr><td>${esc(x.email||x.nome)}</td><td>${esc(x.perfil||'')}${x.postoNome?' · '+esc(x.postoNome):''}</td><td>${x.estado==='criada'?'Criada':x.estado==='existente'?'Já existia (não alterada)':'Erro: '+esc(x.motivo)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    </div></details></section>
   <section><h3 class="eyebrow">Contas existentes${contas.length?` · ${contas.filter(c=>c.activo).length} activas`:''}</h3>
     ${G.erro?`<div class="warn">${esc(G.erro)}</div>`:''}
     ${G.contas==='a carregar'?'<p class="empty">A carregar…</p>':contas.length?`<div class="list compact">${contas.map(c=>`<article class="card"><div class="card-h"><div><h3>${esc(c.utilizador)}</h3>
-        <div class="meta">${esc(c.nome)} · ${c.perfil==='admin'?'Admin':c.perfil==='gestor'?'Gestor':'Conta de posto · código '+esc(c.posto_id)}${c.activo?'':' · <b>desactivada</b>'}</div></div></div>
-        ${G.repor===c.utilizador?`<form class="row" data-form="repor" data-u="${esc(c.utilizador)}"><input class="input grow" name="senha" type="text" minlength="10" placeholder="Nova senha (mín. 10)" required aria-label="Nova senha para ${esc(c.utilizador)}"><button class="btn primary sm" type="submit">Guardar</button><button class="btn sm" type="button" data-act="reporcancelar">Cancelar</button></form>`:''}
-        ${G.perfil===c.utilizador?`<form class="list" data-form="alterarperfil" data-u="${esc(c.utilizador)}"><select class="input" name="perfil" aria-label="Novo perfil"><option value="posto" ${c.perfil==='posto'?'selected':''}>Posto</option><option value="gestor" ${c.perfil==='gestor'?'selected':''}>Gestor</option><option value="admin" ${c.perfil==='admin'?'selected':''}>Admin</option></select>
+        <div class="meta">${esc(c.nome)} · ${c.perfil==='admin'?'Admin':c.perfil==='gestor'?'Gestor':c.perfil==='visualizador'?'Visualizador':'Posto '+esc(nomePosto(c.posto_id))}${c.activo?'':' · <b>desactivada</b>'}${c.pendente?` · <b>à espera do primeiro acesso</b>${c.expira&&c.expira<agora()?' (código expirado)':''}`:''}</div></div></div>
+        ${G.perfil===c.utilizador?`<form class="list" data-form="alterarperfil" data-u="${esc(c.utilizador)}"><select class="input" name="perfil" aria-label="Novo perfil"><option value="posto" ${c.perfil==='posto'?'selected':''}>Posto</option><option value="gestor" ${c.perfil==='gestor'?'selected':''}>Gestor</option><option value="visualizador" ${c.perfil==='visualizador'?'selected':''}>Visualizador</option><option value="admin" ${c.perfil==='admin'?'selected':''}>Admin</option></select>
           <select class="input" name="posto" aria-label="Posto (só para perfil Posto)"><option value="">Posto (só para perfil Posto)</option>${S.postos.map(p=>`<option value="${p.id}" ${String(c.posto_id)===String(p.id)?'selected':''}>${esc(p.nome)}</option>`).join('')}</select>
           <div class="row"><button class="btn primary sm" type="submit">Guardar perfil</button><button class="btn sm" type="button" data-act="perfilcancelar">Cancelar</button></div></form>`:''}
-        <div class="acts"><button class="btn sm" type="button" data-act="reporsenha" data-u="${esc(c.utilizador)}">Nova senha</button>
+        <div class="acts"><button class="btn sm" type="button" data-act="novocodigo" data-u="${esc(c.utilizador)}">${c.pendente?'Novo código de acesso':'Repor acesso (novo código)'}</button>
           ${c.utilizador===PERFIL.utilizador?'':`<button class="btn sm" type="button" data-act="alterarperfil" data-u="${esc(c.utilizador)}">Alterar perfil</button>`}
           ${c.utilizador===PERFIL.utilizador?'':`<button class="btn sm" type="button" data-act="estadoconta" data-u="${esc(c.utilizador)}" data-v="${c.activo?0:1}">${c.activo?'Desactivar':'Reactivar'}</button>`}</div></article>`).join('')}</div>`:'<p class="empty">Ainda não há contas.</p>'}
     ${semConta.length&&contas.length?`<details><summary>${semConta.length} postos ainda sem conta</summary><p class="small">${semConta.map(p=>esc(p.nome)).join(' · ')}</p></details>`:''}
@@ -1265,7 +1306,16 @@ document.addEventListener('click', async ev=>{
     try{ await navigator.clipboard.writeText(t); toast('Mensagem copiada.'); }
     catch(e){ const r=document.createRange(); r.selectNodeContents($('#msgtxt')); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast('Texto seleccionado. Use Copiar no telemóvel.'); }
   }
-  else if(a==='reporsenha'){ G.repor=b.dataset.u; G.perfil=null; route(); }
+  else if(a==='novocodigo'){
+    if(!confirm(`Gerar um novo código de acesso para ${b.dataset.u}? A senha actual desta conta deixa de funcionar até a pessoa gravar uma nova.`)) return;
+    try{ G.codigo = await api('POST','/api/contas/'+encodeURIComponent(b.dataset.u)+'/codigo',{}); carregarContas(); scrollTo({top:0,behavior:'smooth'}); }catch(e){ toast(e.message); } }
+  else if(a==='copiarcodigo'){ try{ await navigator.clipboard.writeText(G.codigo.codigo); toast('Código copiado.'); }catch(_){ toast('Seleccione e copie o código.'); } }
+  else if(a==='fecharcodigo'){ G.codigo=null; route(); }
+  else if(a==='importarcontas'){ const t=$('#imp-txt').value; if(!t.trim()){ toast('Cole primeiro as linhas da folha.'); return; }
+    b.disabled=true; try{ G.imp = await api('POST','/api/contas/importar',{texto:t}); carregarContas(); }catch(e){ toast(e.message); } b.disabled=false; }
+  else if(a==='baixarcodigos'){ const linhas = G.imp.filter(x=>x.estado==='criada');
+    const csv = '\ufeffNome;Email;Perfil;Posto;Código de primeiro acesso;Válido até\n' + linhas.map(x=>[x.nome,x.email,x.perfil,x.postoNome||'',x.codigo,fD.format(x.expira)].map(v=>String(v).replace(/;/g,',')).join(';')).join('\n');
+    const el=document.createElement('a'); el.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv); el.download='codigos-primeiro-acesso.csv'; document.body.append(el); el.click(); el.remove(); }
   else if(a==='alterarperfil'){ G.perfil=b.dataset.u; G.repor=null; route(); }
   else if(a==='perfilcancelar'){ G.perfil=null; route(); }
   else if(a==='recarregar'){ location.reload(); }
@@ -1288,14 +1338,11 @@ document.addEventListener('toggle', ev=>{ if(ev.target && ev.target.id==='aud-de
 document.addEventListener('change', async ev=>{
   const t=ev.target;
   if(t.id==='ct-posto'){ const f=t.form, p=S.postos.find(x=>String(x.id)===t.value);
-    f.utilizador.value = p ? utilPosto(p.id) : ''; f.nome.value = p ? nomeContaPosto(p) : '';
-    if(p) f.senha.focus(); }
+    f.nome.value = p ? nomeContaPosto(p) : ''; if(p) f.utilizador.focus(); }
   if(t.id==='ct-perfil'){ const f=t.form, posto=t.value==='posto';
-    f.posto.disabled=!posto; f.posto.value=''; f.utilizador.value=''; f.nome.value='';
-    f.utilizador.readOnly=posto; f.nome.readOnly=posto;
-    f.utilizador.placeholder = posto ? 'Preenchido ao escolher o posto' : 'por exemplo, rufino';
+    f.posto.disabled=!posto; f.posto.value=''; f.nome.value='';
     f.nome.placeholder = posto ? 'Preenchido ao escolher o posto' : 'por exemplo, Rufino Chipongue';
-    if(!posto) f.utilizador.focus(); }
+    f.utilizador.focus(); }
   if(t.name==='momento' && t.form && (t.form.dataset.form==='confirmar' || t.form.dataset.form==='confirmarrede')){
     const ok = MOMENTO_OK[t.value]||[];
     ['GA','GO'].forEach(k=>t.form.querySelectorAll(`input[name="${k}"]`).forEach(r=>{
@@ -1315,10 +1362,10 @@ document.addEventListener('submit', async ev=>{
     pedirGps();
   }
   else if(k==='conta'){
-    const d={perfil:f.perfil.value, posto:f.posto.value, utilizador:f.utilizador.value.trim(), nome:f.nome.value.trim(), senha:f.senha.value};
+    const d={perfil:f.perfil.value, posto:f.posto.value, utilizador:f.utilizador.value.trim(), nome:f.nome.value.trim()};
     if(d.perfil==='posto' && !d.posto){ toast('Escolha o posto desta conta.'); return; }
-    if(d.senha.length<10){ toast('A senha tem de ter pelo menos 10 caracteres.'); return; }
-    try{ await api('POST','/api/contas',d); toast(`Conta «${d.utilizador}» criada.`); carregarContas(); }catch(e){ toast(e.message); }
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.utilizador)){ toast('Indique o email da pessoa ou do posto.'); return; }
+    try{ G.codigo = await api('POST','/api/contas',d); carregarContas(); }catch(e){ toast(e.message); }
   }
   else if(k==='confirmarrede'){
     const GA=f.GA.value, GO=f.GO.value, mom=f.momento.value;
