@@ -5,3 +5,5 @@ copias/
 cloudflared.exe
 vercel-estatico/
 .vercel/
+# folha «Perfis de Acesso» (nomes e emails de colaboradores): dados pessoais, fica só nos PCs e servidores
+deploy/perfis-acesso.csv

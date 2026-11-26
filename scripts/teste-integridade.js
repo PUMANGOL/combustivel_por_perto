@@ -175,7 +175,8 @@ function lerDB() {
   ok('33. Conta de posto não vê as contas', (await pedido('GET', '/api/contas', undefined, P9)).status === 403);
   ok('34. Gestor não vê as contas', (await pedido('GET', '/api/contas', undefined, G)).status === 403);
   ok('35. Admin vê as contas', (await pedido('GET', '/api/contas', undefined, A)).status === 200);
-  x = await pedido('POST', '/api/contas', { utilizador: 'posto09', nome: 'X', perfil: 'posto', posto: '9', senha: 'OutraSenha2026' }, A);
+  await pedido('POST', '/api/contas', { utilizador: 'novo.posto@pumangol.co.ao', nome: 'X', perfil: 'posto', posto: '9' }, A);
+  x = await pedido('POST', '/api/contas', { utilizador: 'NOVO.posto@pumangol.co.ao', nome: 'Y', perfil: 'gestor' }, A);
   ok('36. Não se cria uma conta que já existe', x.status === 409, x.status);
   x = await pedido('POST', '/api/contas/admin1/perfil', { perfil: 'gestor' }, A);
   ok('37. O admin não altera o seu próprio perfil', x.status === 400);

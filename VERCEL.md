@@ -65,22 +65,30 @@ Em **Settings › Functions**:
 2. No registo do build deve aparecer: `Configuração da Vercel completa`.
 3. Abra o endereço do projecto (`https://<projecto>.vercel.app`). A página deve mostrar a rede com todos os postos «Disponível» (estado inicial).
 
-## 5. Criar a primeira conta de administrador
+## 5. Contas: importar os perfis de acesso (ou criar a primeira conta de administrador)
 
-A primeira conta de admin cria-se a partir de um PC com esta pasta e o Node.js 22.13 ou superior, ligado à mesma base de dados Turso. Numa janela do **PowerShell**, na pasta do portal:
+As contas criam-se a partir de um PC com esta pasta e o Node.js 22.13 ou superior, ligado à mesma base de dados Turso. Numa janela do **PowerShell**, na pasta do portal:
 
 ```powershell
 $env:TURSO_DATABASE_URL = "libsql://<nome>-<organização>.turso.io"
 $env:TURSO_AUTH_TOKEN = "<token>"
 npm install
-node scripts/criar-utilizador.js <utilizador> "<Nome completo>"
+node scripts/importar-perfis.js deploy/perfis-acesso.csv
 ```
 
-O programa pede a senha duas vezes (mínimo 10 caracteres) e só funciona enquanto não existir nenhum admin. Na primeira linha mostra a base de dados que está a usar: confirme que começa por `Turso libsql://`.
+A importação cria só as contas da folha «Perfis de Acesso» que ainda não existem (o utilizador é o email) e grava os **códigos de primeiro acesso** num ficheiro na pasta `copias` deste PC. Entregue cada código só à pessoa respectiva e apague o ficheiro depois. Cada pessoa entra em **Entrar › Primeiro acesso** e grava a sua senha.
+
+Em alternativa, sem importação, cria-se só a primeira conta de admin (o programa pede a senha duas vezes e só funciona enquanto não existir nenhum admin):
+
+```powershell
+node scripts/criar-utilizador.js <email> "<Nome completo>"
+```
+
+Na primeira linha, os dois programas mostram a base de dados que estão a usar: confirme que começa por `Turso libsql://`.
 
 Na mesma janela, `node scripts/verificar.js` confirma a ligação, as contas e a integridade dos dados.
 
-Depois entre no portal com essa conta e crie as contas de posto e de gestor no separador **Gestão**, como no servidor próprio.
+Depois, o admin cria ou importa as outras contas no separador **Gestão**, como no servidor próprio. As contas das versões anteriores mantêm-se (utilizador, senha, perfil e posto) na primeira ligação da versão 6.
 
 ## 6. Domínio combustivel.por.perto.pumangol.co.ao
 

@@ -22,7 +22,7 @@ const ok = t => console.log('  ✓ ' + t), mal = t => console.log('  ✗ ' + t),
     ok(`confirmações guardadas: ${await armazem.contar('confirmacoes')} (a última de cada posto e combustível)`);
     const contas = (await armazem.contas()).filter(c => c.activo), n = p => contas.filter(c => c.perfil === p).length;
     if (!n('admin')) { falhas++; mal('ainda não há nenhuma conta de administrador'); nota('Crie-a: node scripts/criar-utilizador.js <utilizador> "<Nome>"  (ou dois cliques em «Criar conta de administrador.bat»)'); }
-    else ok(`contas activas: ${n('admin')} admin, ${n('gestor')} gestor, ${n('posto')} posto`);
+    else ok(`contas activas: ${n('admin')} admin, ${n('gestor')} gestor, ${n('visualizador')} visualizador, ${n('posto')} posto (${contas.filter(c => c.pendente).length} à espera do primeiro acesso)`);
     const integ = await armazem.integridade(await require('../postos').validos(armazem));
     if (integ.ok) ok(`integridade das confirmações: ${integ.confirmacoes} confirmação(ões), sem problemas`);
     else { falhas++; mal('integridade das confirmações'); integ.problemas.slice(0, 8).forEach(p => nota('- ' + p)); }

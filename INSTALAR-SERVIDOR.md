@@ -1,4 +1,4 @@
-# Combustível por Perto 5.13 — instalação em https://combustivel.por.perto.pumangol.co.ao
+# Combustível por Perto 6.0 — instalação em https://combustivel.por.perto.pumangol.co.ao
 
 Guia para a equipa de informática da Pumangol. Os ficheiros de configuração estão na pasta `deploy/`. O relatório da auditoria de segurança está em `RELATORIO-SEGURANCA.md`.
 
@@ -23,7 +23,7 @@ Node.js — server.js (Express)
 | Base de dados | SQLite num ficheiro, através do módulo `node:sqlite` do Node.js: **não exige servidor de base de dados** |
 | Dependências externas em funcionamento | nenhuma (não liga a outros sistemas nem a serviços na internet) |
 | Dependências npm | express 5, jsonwebtoken 9, bcryptjs, cookie-parser, dotenv: `npm audit` sem vulnerabilidades |
-| Perfis | **Posto** (confirma o seu posto), **Gestor** (toda a rede), **Admin** (contas, perfis, auditoria) |
+| Perfis | **Posto** (confirma o seu posto), **Gestor** (toda a rede), **Visualizador** (só consulta), **Admin** (contas, perfis, auditoria). O utilizador é o **email**; cada pessoa grava a sua senha no primeiro acesso, com um código pessoal |
 | Segurança | CSP estrita, cookie `__Host-` Secure/HttpOnly/SameSite=Strict, bcrypt 12, bloqueio por tentativas, registo de auditoria (ver relatório) |
 
 ## 2. Requisitos
@@ -59,9 +59,11 @@ sudo mkdir -p dados copias
 sudo chown -R cpp:cpp /opt/combustivel-por-perto
 sudo chmod 600 .env && sudo chmod 700 dados copias
 
-# 3.3 Primeira conta de administrador (a senha é pedida no ecrã; 10 a 72 caracteres)
-sudo -u cpp node scripts/criar-utilizador.js <utilizador> "<Nome completo>"
-sudo -u cpp node scripts/verificar.js       # tudo com ✓
+# 3.3 Contas: importar a folha «Perfis de Acesso» (113 contas; o utilizador é o email)
+sudo -u cpp node scripts/importar-perfis.js deploy/perfis-acesso.csv
+#     → cria as contas «à espera do primeiro acesso» e grava os códigos pessoais em copias/codigos-acesso-*.csv (permissões 600)
+#     → entregar esse ficheiro, por canal seguro, só ao responsável funcional, e apagá-lo do servidor depois
+sudo -u cpp node scripts/verificar.js       # tudo com ✓ (2 admin, 9 gestor, 19 visualizador, 83 posto)
 
 # 3.4 Serviço
 sudo cp deploy/combustivel-por-perto.service /etc/systemd/system/
@@ -95,7 +97,7 @@ Registos do serviço: `journalctl -u combustivel-por-perto -f`.
    ```
    npm ci --omit=dev
    copy deploy\env-producao.exemplo .env
-   node scripts\criar-utilizador.js <utilizador> "<Nome completo>"
+   node scripts\importar-perfis.js deploy\perfis-acesso.csv
    node scripts\verificar.js
    ```
    Restrinja as permissões NTFS de `.env`, `dados` e `copias` à conta do serviço e aos administradores.
@@ -115,14 +117,14 @@ Os ficheiros `.bat` servem para uso manual. Em produção, o portal corre como s
 
 ## 5. Verificação depois de instalado
 
-1. **https://combustivel.por.perto.pumangol.co.ao** abre o portal com «v5.13» no topo.
+1. **https://combustivel.por.perto.pumangol.co.ao** abre o portal com «v6.0» no topo.
 2. Cabeçalhos de segurança: `curl -sI https://combustivel.por.perto.pumangol.co.ao | grep -iE 'content-security|strict-transport|x-frame'` mostra os três.
 3. `http://combustivel.por.perto.pumangol.co.ao` redirecciona para `https://`.
-4. Entre com a conta de admin. Em **Gestão › Criar conta**, crie as contas dos postos (escolha o posto: o utilizador `postoNN` e o nome preenchem-se sozinhos) e dos gestores.
+4. O responsável funcional entra em **Entrar › Primeiro acesso** com o seu email e o seu código, e grava a sua senha. Cada colaborador e cada posto faz o mesmo com o código que lhe for entregue. Novas contas criam-se em **Gestão › Criar conta** (o portal gera o código).
 5. Num telemóvel: «📍 Usar a minha localização» pede autorização e mostra os postos mais próximos.
 6. Testes automáticos (usam dados temporários e as portas 3997 a 3999, só em 127.0.0.1; não tocam nos dados reais):
    ```
-   sudo -u cpp node scripts/teste-seguranca.js     # 92 verificações
+   sudo -u cpp node scripts/teste-seguranca.js     # 115 verificações
    sudo -u cpp node scripts/teste-integridade.js   # 62 verificações
    ```
 
@@ -137,7 +139,7 @@ O QR Code do portal usa automaticamente este endereço.
 | Tarefa | Como |
 |---|---|
 | Estado do serviço | `GET /api/saude` → `{"ok":true}` |
-| Contas, perfis, senhas | no portal, pelo admin: **Gestão** |
+| Contas, perfis, códigos de acesso | no portal, pelo admin: **Gestão** (senha esquecida: «Repor acesso (novo código)») |
 | Registo de auditoria | no portal, pelo admin: **Gestão › Registo de auditoria** |
 | Admin sem senha (emergência) | `node scripts/repor-senha.js <utilizador>` (só muda a senha; fica registado na auditoria) |
 | Cópia manual | `node scripts/copia-seguranca.js` (pode ser com o serviço ligado) → `copias/` |

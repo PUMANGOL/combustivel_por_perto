@@ -102,10 +102,12 @@ const base = TURSO_URL ? ligarTurso(TURSO_URL) : ligarFicheiro();
 
 /* ---------- tabelas ---------- */
 const TABELAS = ['postos', 'runouts', 'confirmacoes', 'decisoes', 'registos', 'config'];
+/* contas: perfis posto / gestor / visualizador / admin; «pendente» = à espera do primeiro acesso (código de activação) */
 const UTILIZADORES = `(
     id INTEGER PRIMARY KEY AUTOINCREMENT, utilizador TEXT NOT NULL UNIQUE COLLATE NOCASE, nome TEXT NOT NULL,
-    senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestor','admin')), posto_id TEXT,
-    activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL)`;
+    senha_hash TEXT NOT NULL, perfil TEXT NOT NULL CHECK (perfil IN ('posto','gestor','visualizador','admin')), posto_id TEXT,
+    activo INTEGER NOT NULL DEFAULT 1, criado_em INTEGER NOT NULL,
+    pendente INTEGER NOT NULL DEFAULT 0, activacao_hash TEXT, activacao_expira INTEGER)`;
 /* registo de auditoria: acções sobre contas, sessões e dados (só acrescenta; guarda as 20 000 mais recentes) */
 const AUD_MAX = 20000;
 /* histórico: no máximo as 5 últimas confirmações de cada posto e combustível */
@@ -132,18 +134,18 @@ const ESQUEMA = [
 ];
 
 async function iniciar() {
-  /* versões anteriores (perfis posto/gestao): converter uma única vez, mantendo ids, senhas e estado.
-     «gestao» tinha acesso total, por isso passa a «admin». Nada mais é alterado. */
+  /* bases de versões anteriores: converter uma única vez, mantendo ids, utilizadores, nomes, senhas, perfis, postos e estado.
+     (v4: «gestao» tinha acesso total e passa a «admin».) Nenhuma conta é apagada. */
   const def = await base.um("SELECT sql FROM sqlite_master WHERE type='table' AND name='utilizadores'");
-  if (def && /'gestao'/.test(def.sql)) {
+  if (def && !/'visualizador'/.test(def.sql)) {
     await base.lote([
-      ['CREATE TABLE utilizadores_v5 ' + UTILIZADORES],
-      [`INSERT INTO utilizadores_v5 (id, utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em)
-        SELECT id, utilizador, nome, senha_hash, CASE perfil WHEN 'gestao' THEN 'admin' ELSE perfil END, posto_id, activo, criado_em FROM utilizadores`],
+      ['CREATE TABLE utilizadores_v6 ' + UTILIZADORES],
+      [`INSERT INTO utilizadores_v6 (id, utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em, pendente)
+        SELECT id, utilizador, nome, senha_hash, CASE perfil WHEN 'gestao' THEN 'admin' ELSE perfil END, posto_id, activo, criado_em, 0 FROM utilizadores`],
       ['DROP TABLE utilizadores'],
-      ['ALTER TABLE utilizadores_v5 RENAME TO utilizadores'],
+      ['ALTER TABLE utilizadores_v6 RENAME TO utilizadores'],
     ]);
-    console.log('Contas convertidas para os perfis posto / gestor / admin (as contas de gestão passaram a admin).');
+    console.log('Contas convertidas para a versão 6 (perfis posto / gestor / visualizador / admin). Nenhuma conta foi alterada.');
   }
   await base.lote([
     ...ESQUEMA.map(sql => [sql]),
@@ -187,13 +189,25 @@ module.exports = {
   async contar(t) { await garantir(); return Number((await base.um(`SELECT COUNT(*) AS n FROM ${ok(t)}`)).n); },
   async utilizador(nome) {
     await garantir();
-    return base.um('SELECT id, utilizador, nome, senha_hash, perfil, posto_id FROM utilizadores WHERE utilizador = ? AND activo = 1', [String(nome).trim()]);
+    return base.um('SELECT id, utilizador, nome, senha_hash, perfil, posto_id, pendente, activacao_hash, activacao_expira FROM utilizadores WHERE utilizador = ? AND activo = 1', [String(nome).trim()]);
   },
   /* só cria: uma conta existente nunca é alterada por aqui (perfis só mudam por acção do admin) */
-  async criarUtilizador({ utilizador, nome, hash, perfil, posto }) {
+  async criarUtilizador({ utilizador, nome, hash, perfil, posto, activacaoHash = null, expira = null }) {
     await garantir();
-    await base.correr('INSERT INTO utilizadores (utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em) VALUES (?, ?, ?, ?, ?, 1, ?)',
-      [utilizador, nome, hash, perfil, posto ?? null, Date.now()]);
+    await base.correr(`INSERT INTO utilizadores (utilizador, nome, senha_hash, perfil, posto_id, activo, criado_em, pendente, activacao_hash, activacao_expira)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+      [utilizador, nome, hash, perfil, posto ?? null, Date.now(), activacaoHash ? 1 : 0, activacaoHash, expira]);
+  },
+  /* novo código de primeiro acesso: a senha anterior deixa de servir até a pessoa definir uma nova */
+  async definirActivacao(u, senhaInutil, activacaoHash, expira) {
+    await garantir();
+    return (await base.correr('UPDATE utilizadores SET senha_hash = ?, pendente = 1, activacao_hash = ?, activacao_expira = ? WHERE utilizador = ?',
+      [senhaInutil, activacaoHash, expira, String(u)])).changes > 0;
+  },
+  async activar(u, hash) {
+    await garantir();
+    return (await base.correr('UPDATE utilizadores SET senha_hash = ?, pendente = 0, activacao_hash = NULL, activacao_expira = NULL WHERE utilizador = ?',
+      [hash, String(u)])).changes > 0;
   },
   async alterarPerfil(u, perfil, posto) {
     await garantir();
@@ -293,7 +307,7 @@ module.exports = {
   },
   async porId(id) {
     await garantir();
-    return base.um('SELECT id, utilizador, nome, perfil, posto_id, activo, senha_hash FROM utilizadores WHERE id = ?', [Number(id)]);
+    return base.um('SELECT id, utilizador, nome, perfil, posto_id, activo, senha_hash, pendente FROM utilizadores WHERE id = ?', [Number(id)]);
   },
   async auditar(accao, { conta = null, utilizador = null, detalhe = null, ip = null } = {}) {
     try {
@@ -308,14 +322,14 @@ module.exports = {
     await garantir();
     return base.todos('SELECT hora, accao, utilizador, detalhe, ip FROM auditoria ORDER BY seq DESC LIMIT ?', [Math.min(1000, Math.max(1, Number(limite) || 200))]);
   },
-  async porNome(u) { await garantir(); return base.um('SELECT id, utilizador, nome, perfil, posto_id, activo FROM utilizadores WHERE utilizador = ?', [String(u)]); },
+  async porNome(u) { await garantir(); return base.um('SELECT id, utilizador, nome, perfil, posto_id, activo, pendente FROM utilizadores WHERE utilizador = ?', [String(u)]); },
   async existeUtilizador(u) { await garantir(); return !!(await base.um('SELECT 1 AS x FROM utilizadores WHERE utilizador = ?', [String(u)])); },
   async mudarSenha(u, hash) { await garantir(); return (await base.correr('UPDATE utilizadores SET senha_hash = ? WHERE utilizador = ?', [hash, String(u)])).changes > 0; },
   async estadoConta(u, activo) { await garantir(); return (await base.correr('UPDATE utilizadores SET activo = ? WHERE utilizador = ?', [activo ? 1 : 0, String(u)])).changes > 0; },
   async desactivarUtilizador(utilizador) { await garantir(); return (await base.correr('UPDATE utilizadores SET activo = 0 WHERE utilizador = ?', [utilizador])).changes; },
   async contas() {
     await garantir();
-    return base.todos('SELECT utilizador, nome, perfil, posto_id, activo FROM utilizadores ORDER BY perfil, utilizador');
+    return base.todos('SELECT utilizador, nome, perfil, posto_id, activo, pendente, activacao_expira FROM utilizadores ORDER BY perfil, utilizador');
   },
 
   /* ---------- limites (janela fixa): tentativas de entrada e escritas por endereço ---------- */
